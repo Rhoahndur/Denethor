@@ -6,9 +6,9 @@
 
 **Automated QA testing for browser-based games using AI-powered automation**
 
-Denethor is an autonomous AI agent system that tests browser games by simulating user interactions, capturing visual evidence, and evaluating playability. Perfect for game developers, QA teams, and anyone building browser games.
+> **🚀 First time here?** See [**START_HERE.md**](START_HERE.md) for a 5-minute setup guide!
 
-> **Demo Status:** Core components are fully functional with 100% test coverage on evidence collection, report generation, and error handling. See [DEMO-GUIDE.md](DEMO-GUIDE.md) for a complete walkthrough.
+Denethor is an autonomous AI agent system that tests browser games by simulating user interactions, capturing visual evidence, and evaluating playability. Perfect for game developers, QA teams, and anyone building browser games.
 
 ## Features
 
@@ -24,36 +24,61 @@ Denethor is an autonomous AI agent system that tests browser games by simulating
 
 ## Quick Start
 
+> **👉 New to Denethor?** Follow the [**QUICKSTART.md**](QUICKSTART.md) guide for detailed step-by-step setup instructions, including getting your API keys!
+
+### Prerequisites
+
+- **Bun 1.0+** - [Install Bun](https://bun.sh/)
+- **API Keys** (free tiers available):
+  - [Browserbase](https://www.browserbase.com/) - Cloud browsers
+  - [OpenAI](https://platform.openai.com/api-keys) - AI evaluation
+
 ### Installation
 
 ```bash
-# Navigate to project directory
+# Clone the repository
+git clone https://github.com/yourusername/Denethor.git
 cd Denethor
 
 # Install dependencies
 bun install
 
-# Set up environment variables (already configured)
-# Your .env file is ready with API keys
+# Set up environment variables
+cp .env.example .env
+# Edit .env and add your API keys (see QUICKSTART.md for details)
 ```
 
-### First Test
+### Configure API Keys
+
+Edit `.env` and add your keys:
 
 ```bash
-# Run offline demo (no API rate limits)
-bun run demo
-
-# View the beautiful HTML report
-open qa-tests/demo/test-*/reports/report.html
-
-# Or run a quick 30-second test (recommended!)
-bun run quick-test https://meiri.itch.io/doce-fim
-
-# Or run a real test (throttled for free tier)
-bun run demo:throttled
+BROWSERBASE_API_KEY=bb_api_your_key_here
+BROWSERBASE_PROJECT_ID=proj_your_project_id_here
+OPENAI_API_KEY=sk-your_key_here
 ```
 
-That's it! See [DEMO-GUIDE.md](DEMO-GUIDE.md) for full demo documentation.
+**Need help?** See [QUICKSTART.md](QUICKSTART.md) for detailed instructions on getting your API keys.
+
+### Run Your First Test
+
+```bash
+# Quick 30-second verification test (recommended!)
+bun run quick-test https://meiri.itch.io/doce-fim
+
+# View the HTML report
+open qa-tests/default/test-*/reports/report.html
+```
+
+**Expected output:**
+```
+✅ Session created successfully
+✅ Game loaded
+✅ Screenshot captured
+✅ Reports generated
+```
+
+That's it! See [QUICKSTART.md](QUICKSTART.md) for detailed setup or [DEMO-GUIDE.md](DEMO-GUIDE.md) for demo documentation.
 
 ### What's the Quick Test?
 

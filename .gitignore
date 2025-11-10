@@ -1,3 +1,7 @@
+# Planning
+PRD.md
+DEMO-SCRIPT.md
+
 # dependencies (bun install)
 node_modules
 
@@ -39,6 +43,3 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
-
-# Product requirements and company information
-PRD.md
