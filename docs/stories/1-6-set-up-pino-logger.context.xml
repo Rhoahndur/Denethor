@@ -1,0 +1,220 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>6</storyId>
+    <title>Set Up Pino Logger</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-03</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/stories/1-6-set-up-pino-logger.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>structured logging with Pino</iWant>
+    <soThat>all components can log consistently with proper levels</soThat>
+    <tasks>
+- [ ] Install Pino dependencies (AC: #1, #3)
+  - [ ] Add pino to dependencies
+  - [ ] Add pino-pretty to dev dependencies
+- [ ] Create logger module (AC: #1, #2, #3, #4, #6)
+  - [ ] Create src/utils/logger.ts file
+  - [ ] Import pino package
+  - [ ] Configure Pino instance with LOG_LEVEL from config
+  - [ ] Add pino-pretty transport for development
+  - [ ] Export logger instance
+  - [ ] Follow architecture Pattern 6 (Logging Patterns)
+- [ ] Add LOG_LEVEL to configuration module (AC: #2)
+  - [ ] Update src/utils/config.ts to include LOG_LEVEL env var
+  - [ ] Provide default value 'info'
+  - [ ] Update .env.example with LOG_LEVEL
+- [ ] Implement child logger support (AC: #5, #6)
+  - [ ] Document child logger pattern in JSDoc
+  - [ ] Verify logger.child({ component: 'name' }) works correctly
+- [ ] Create comprehensive unit tests (AC: #7)
+  - [ ] Test logger instance creation
+  - [ ] Test LOG_LEVEL configuration from env var
+  - [ ] Test default log level is 'info'
+  - [ ] Test child logger creation with component context
+  - [ ] Test logger methods (info, warn, error, debug)
+  - [ ] Test structured logging format
+  - [ ] Mock process.env for test isolation
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. Create `src/utils/logger.ts` with Pino instance
+2. Configure log level from LOG_LEVEL env var (default: 'info')
+3. Add pino-pretty transport for development
+4. Export logger instance for use across components
+5. Support child loggers with component context
+6. Follow logging pattern from architecture.md
+7. Unit tests verify logger creation and child logger functionality
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture - Pattern 6: Logging Patterns</title>
+        <section>Logging Patterns (lines 529-572)</section>
+        <snippet>Pino structured logging with child loggers per component. Logger setup: pino({ level: process.env.LOG_LEVEL || 'info', transport: pino-pretty }). Component usage: logger.child({ component: 'name' }). Structured logging: log.info({ context }, 'message'). Log levels: debug (detailed), info (milestones), warn (retries), error (failures). Rules: ALWAYS structured logging, NEVER console.log, ALWAYS include context, use child loggers.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture - Logging Strategy</title>
+        <section>Logging Strategy (lines 658-673)</section>
+        <snippet>Centralized in src/utils/logger.ts, Pino with pretty-printing for development, JSON output for production, log level controlled via LOG_LEVEL env var. Structured logging pattern with component context.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics.md</path>
+        <title>Epic 1 - Story 1.6</title>
+        <section>Story 1.6: Set Up Pino Logger</section>
+        <snippet>Story defines logger setup with Pino instance, LOG_LEVEL configuration, pino-pretty transport, child logger support. Prerequisites: Story 1.5 (config module available).</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>src/utils/config.ts</path>
+        <kind>config-module</kind>
+        <symbol>config</symbol>
+        <lines>1-44</lines>
+        <reason>Need to add LOG_LEVEL env var to config object following same pattern as existing vars. Structure: config.logging.level = process.env.LOG_LEVEL || 'info'. Import with: import { config } from './config'</reason>
+      </artifact>
+      <artifact>
+        <path>src/utils/config.test.ts</path>
+        <kind>test</kind>
+        <symbol>config tests</symbol>
+        <lines>1-214</lines>
+        <reason>Reference for test patterns - shows how to mock process.env, test env var loading, test defaults. Apply same patterns to logger.test.ts: vi.resetModules(), process.env mocking, default value tests.</reason>
+      </artifact>
+      <artifact>
+        <path>.env.example</path>
+        <kind>env-template</kind>
+        <symbol>environment variables</symbol>
+        <lines>1-16</lines>
+        <reason>Need to add LOG_LEVEL with default 'info' and helpful comment explaining log levels (trace, debug, info, warn, error, fatal).</reason>
+      </artifact>
+      <artifact>
+        <path>package.json</path>
+        <kind>dependencies</kind>
+        <symbol>pino</symbol>
+        <lines>19</lines>
+        <reason>Pino 10.1.0 already in dependencies - no need to add. Need to add pino-pretty to devDependencies for development transport.</reason>
+      </artifact>
+      <artifact>
+        <path>vitest.config.ts</path>
+        <kind>test-config</kind>
+        <symbol>vitest configuration</symbol>
+        <lines>1-12</lines>
+        <reason>Test framework configuration - globals: true, environment: 'node', coverage with v8 provider. Logger tests will run in this environment.</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <node>
+        <runtime>bun (latest)</runtime>
+        <testing>vitest@4.0, @vitest/coverage-v8@^4.0.6</testing>
+        <quality>@biomejs/biome@2.3.2</quality>
+        <logging>pino@10.1.0 (already installed)</logging>
+        <logging-dev>pino-pretty (NEEDS TO BE ADDED to devDependencies)</logging-dev>
+      </node>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Follow architecture.md Pattern 6 exactly (lines 529-572) - pino({ level: LOG_LEVEL, transport: pino-pretty })</constraint>
+    <constraint>Access LOG_LEVEL through config module, NOT directly from process.env</constraint>
+    <constraint>Add LOG_LEVEL to config.ts following same pattern as existing env vars</constraint>
+    <constraint>Default log level is 'info' if LOG_LEVEL not set</constraint>
+    <constraint>Use pino-pretty transport for development (colorize: true)</constraint>
+    <constraint>Export logger instance as const: export const logger = pino({...})</constraint>
+    <constraint>TypeScript strict mode compatible - proper typing for pino import</constraint>
+    <constraint>Test file co-located: src/utils/logger.test.ts alongside src/utils/logger.ts</constraint>
+    <constraint>Mock process.env in tests for deterministic, isolated test execution</constraint>
+    <constraint>Add pino-pretty to devDependencies (not dependencies)</constraint>
+    <constraint>Update .env.example with LOG_LEVEL and helpful comment</constraint>
+    <constraint>Support child logger pattern: logger.child({ component: 'ComponentName' })</constraint>
+    <constraint>JSDoc documentation for logger export explaining usage</constraint>
+    <constraint>Valid Pino log levels: trace, debug, info, warn, error, fatal</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>logger</name>
+      <kind>exported pino instance</kind>
+      <signature>
+// src/utils/logger.ts
+import pino from 'pino'
+import { config } from './config'
+
+export const logger = pino({
+  level: config.logging.level,
+  transport: {
+    target: 'pino-pretty',
+    options: { colorize: true }
+  }
+})
+      </signature>
+      <path>src/utils/logger.ts</path>
+    </interface>
+    <interface>
+      <name>config.logging</name>
+      <kind>config extension for LOG_LEVEL</kind>
+      <signature>
+// src/utils/config.ts - ADD to config object
+export const config = {
+  browserbase: { ... },
+  openai: { ... },
+  output: { ... },
+  logging: {
+    level: process.env.LOG_LEVEL || 'info'
+  }
+}
+      </signature>
+      <path>src/utils/config.ts</path>
+    </interface>
+    <interface>
+      <name>logger usage pattern</name>
+      <kind>component usage example</kind>
+      <signature>
+// In any component
+import { logger } from '@/utils/logger'
+const log = logger.child({ component: 'BrowserAgent' })
+
+log.info({ url, attempt: 1 }, 'Loading game')
+log.error({ error, url }, 'Failed to load game')
+log.debug({ action: 'click', selector }, 'Executing action')
+log.warn({ retryCount: 2 }, 'Retrying action')
+      </signature>
+      <path>Future components (Story 1.8+)</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+Tests use Vitest 4.0 with globals enabled, node environment, and v8 coverage provider. Test files co-located with implementation (*.test.ts pattern). Tests use describe blocks for organization, comprehensive coverage of happy paths and error cases, mocking for external dependencies. Follow patterns from src/utils/config.test.ts: mock process.env using vi.resetModules() and beforeEach/afterEach setup, test env var loading, test defaults, test all public methods.
+    </standards>
+    <locations>
+src/utils/logger.test.ts (co-located with src/utils/logger.ts)
+    </locations>
+    <ideas>
+      <idea ac="1,4">Test logger instance is created and exported</idea>
+      <idea ac="2">Test logger uses LOG_LEVEL from config.logging.level</idea>
+      <idea ac="2">Test logger defaults to 'info' level when LOG_LEVEL not set</idea>
+      <idea ac="2">Test logger uses custom level when LOG_LEVEL is set to 'debug'</idea>
+      <idea ac="2">Test logger uses custom level when LOG_LEVEL is set to 'warn'</idea>
+      <idea ac="3">Test logger has pino-pretty transport configured</idea>
+      <idea ac="3">Test pino-pretty transport has colorize option set to true</idea>
+      <idea ac="5">Test logger.child({ component: 'TestComponent' }) creates child logger</idea>
+      <idea ac="5">Test child logger has component context in logs</idea>
+      <idea ac="5">Test child logger inherits parent log level</idea>
+      <idea ac="7">Test logger.info() method exists and works</idea>
+      <idea ac="7">Test logger.warn() method exists and works</idea>
+      <idea ac="7">Test logger.error() method exists and works</idea>
+      <idea ac="7">Test logger.debug() method exists and works</idea>
+      <idea ac="7">Test structured logging format: log.info({ context }, 'message')</idea>
+      <idea ac="7">Mock pino module to verify configuration parameters</idea>
+      <idea ac="7">Test logger can be imported without errors</idea>
+    </ideas>
+  </tests>
+</story-context>

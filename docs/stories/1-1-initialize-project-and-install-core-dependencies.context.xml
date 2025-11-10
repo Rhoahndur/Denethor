@@ -1,0 +1,214 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>1</storyId>
+    <title>Initialize Project and Install Core Dependencies</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-03</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/stories/1-1-initialize-project-and-install-core-dependencies.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>the project initialized with all core dependencies installed</iWant>
+    <soThat>I can begin implementing features with the correct tooling</soThat>
+    <tasks>
+      <task id="1" ac="1,2">
+        <description>Update package.json with production dependencies</description>
+        <subtasks>
+          <subtask>Add @browserbasehq/sdk@2.6.0</subtask>
+          <subtask>Add @browserbasehq/stagehand@2.5.0</subtask>
+          <subtask>Add ai@5.0.86</subtask>
+          <subtask>Add @ai-sdk/openai@2.0.59</subtask>
+          <subtask>Add commander@14.0.2</subtask>
+          <subtask>Add pino@10.1.0</subtask>
+        </subtasks>
+      </task>
+      <task id="2" ac="3">
+        <description>Update package.json with development dependencies</description>
+        <subtasks>
+          <subtask>Add vitest@4.0</subtask>
+          <subtask>Add @biomejs/biome@2.3.2</subtask>
+        </subtasks>
+      </task>
+      <task id="3" ac="4,5,6">
+        <description>Install all dependencies</description>
+        <subtasks>
+          <subtask>Run `bun install`</subtask>
+          <subtask>Verify bun.lock file is generated</subtask>
+          <subtask>Verify all packages install without errors</subtask>
+          <subtask>Verify package.json is updated</subtask>
+        </subtasks>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="1">All dependencies from architecture.md installed via `bun install`</criterion>
+    <criterion id="2">Dependencies include: @browserbasehq/sdk@2.6.0, @browserbasehq/stagehand@2.5.0, ai@5.0.86, @ai-sdk/openai@2.0.59, commander@14.0.2, pino@10.1.0</criterion>
+    <criterion id="3">Dev dependencies include: vitest@4.0, @biomejs/biome@2.3.2</criterion>
+    <criterion id="4">package.json updated with all dependencies</criterion>
+    <criterion id="5">bun.lock file generated</criterion>
+    <criterion id="6">All packages install without errors</criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Decision 1: Runtime Environment</section>
+        <snippet>Bun with Node.js 20 compatibility mode. Bun is 3x faster than Node.js for typical web server workloads, has native TypeScript support, and provides built-in test runner.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Decision 2: Testing Framework</section>
+        <snippet>Vitest 4.0 selected for modern testing with ESM-first approach, 10x faster than Jest, and seamless Bun integration.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Decision 3: Code Quality</section>
+        <snippet>Biome 2.3.2 selected as all-in-one linter and formatter, 100x faster than ESLint+Prettier combination, with single tool to maintain.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Decision 5: Browser Automation</section>
+        <snippet>Browserbase SDK 2.6.0 + Stagehand 2.5.0 for cloud browser infrastructure with AI-native control capabilities.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Decision 6: AI Integration</section>
+        <snippet>Vercel AI SDK 5.0.86 with OpenAI 2.0.59 provider for unified LLM interface supporting multiple AI models.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Decision 7: CLI Framework</section>
+        <snippet>Commander 14.0.2 selected for building command-line interfaces with automatic help generation.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Decision 8: Logging</section>
+        <snippet>Pino 10.1.0 chosen for fast structured JSON logging with child logger support for component-specific context.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics.md</path>
+        <title>Epic Breakdown</title>
+        <section>Epic 1: Project Foundation & Infrastructure</section>
+        <snippet>Story 1.1 establishes foundational infrastructure by installing all core dependencies specified in architecture decisions.</snippet>
+      </doc>
+      <doc>
+        <path>PRD.md</path>
+        <title>Product Requirements Document</title>
+        <section>Non-Functional Requirements</section>
+        <snippet>NFR-1: Performance - Each test must complete in under 5 minutes. NFR-4: Test Coverage - Minimum 70% code coverage required.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>package.json</path>
+        <kind>configuration</kind>
+        <symbol>package manifest</symbol>
+        <lines>1-12</lines>
+        <reason>Current package.json contains Bun starter dependencies. Will be updated with all production and dev dependencies per acceptance criteria.</reason>
+      </artifact>
+      <artifact>
+        <path>tsconfig.json</path>
+        <kind>configuration</kind>
+        <symbol>TypeScript configuration</symbol>
+        <lines>1-15</lines>
+        <reason>TypeScript compiler configuration already set up with strict mode and ESNext target per architecture.</reason>
+      </artifact>
+      <artifact>
+        <path>index.ts</path>
+        <kind>entry-point</kind>
+        <symbol>main entry</symbol>
+        <lines>1-2</lines>
+        <reason>Bun starter entry point exists. Will remain as-is until orchestrator implementation in Epic 6.</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <ecosystem name="Node.js/Bun">
+        <current>
+          <package name="@types/bun" version="latest" scope="dev" />
+          <package name="typescript" version="^5" scope="peer" />
+        </current>
+        <toAdd>
+          <package name="@browserbasehq/sdk" version="2.6.0" scope="production" />
+          <package name="@browserbasehq/stagehand" version="2.5.0" scope="production" />
+          <package name="ai" version="5.0.86" scope="production" />
+          <package name="@ai-sdk/openai" version="2.0.59" scope="production" />
+          <package name="commander" version="14.0.2" scope="production" />
+          <package name="pino" version="10.1.0" scope="production" />
+          <package name="vitest" version="4.0" scope="dev" />
+          <package name="@biomejs/biome" version="2.3.2" scope="dev" />
+        </toAdd>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Use exact versions specified in architecture.md - no version ranges or updates without architectural review</constraint>
+    <constraint>All dependencies must be compatible with Bun runtime (Node.js 20 compatibility mode)</constraint>
+    <constraint>Use Bun's native package manager (bun install) - do not use npm or yarn</constraint>
+    <constraint>Verify bun.lock is generated for reproducible builds across environments</constraint>
+    <constraint>All packages must install without errors or warnings to satisfy AC #6</constraint>
+    <constraint>Feature-based project structure: src/orchestrator/, src/browser-agent/, src/ai-evaluator/, src/evidence-store/, src/report-generator/, src/errors/, src/utils/, src/types/</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>package.json dependencies field</name>
+      <kind>configuration</kind>
+      <signature>
+{
+  "dependencies": {
+    "@browserbasehq/sdk": "2.6.0",
+    "@browserbasehq/stagehand": "2.5.0",
+    "ai": "5.0.86",
+    "@ai-sdk/openai": "2.0.59",
+    "commander": "14.0.2",
+    "pino": "10.1.0"
+  }
+}
+      </signature>
+      <path>package.json</path>
+    </interface>
+    <interface>
+      <name>package.json devDependencies field</name>
+      <kind>configuration</kind>
+      <signature>
+{
+  "devDependencies": {
+    "@types/bun": "latest",
+    "vitest": "4.0",
+    "@biomejs/biome": "2.3.2"
+  }
+}
+      </signature>
+      <path>package.json</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Testing framework is Vitest 4.0 per architecture Decision 2. Tests should be written in TypeScript with .test.ts extension. Unit tests co-located with source files. Coverage target is 70%+ per NFR-4. This story focuses on dependency installation - no test implementation required, but future stories will use installed Vitest framework.
+    </standards>
+    <locations>
+      <location>src/**/*.test.ts</location>
+      <location>tests/integration/</location>
+    </locations>
+    <ideas>
+      <idea ac="6">Verify `bun install` command exits with code 0 (no errors)</idea>
+      <idea ac="5">Verify bun.lock file exists after installation</idea>
+      <idea ac="4">Verify package.json contains all expected dependencies with correct versions</idea>
+      <idea ac="2,3">Parse package.json and verify exact versions match architecture specifications</idea>
+    </ideas>
+  </tests>
+</story-context>

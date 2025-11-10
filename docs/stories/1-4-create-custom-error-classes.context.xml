@@ -1,0 +1,260 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>4</storyId>
+    <title>Create Custom Error Classes</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-03</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/stories/1-4-create-custom-error-classes.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>typed error classes for different failure scenarios</iWant>
+    <soThat>error handling logic can distinguish between retry-able and fatal errors</soThat>
+    <tasks>
+      <task id="1" ac="1">
+        <description>Create src/errors directory structure</description>
+        <subtasks>
+          <subtask>Create src/ directory if it doesn't exist</subtask>
+          <subtask>Create src/errors/ subdirectory</subtask>
+        </subtasks>
+      </task>
+      <task id="2" ac="1,5,6">
+        <description>Implement QAError base class</description>
+        <subtasks>
+          <subtask>Extend Error class</subtask>
+          <subtask>Add message parameter</subtask>
+          <subtask>Add optional cause parameter</subtask>
+          <subtask>Follow TypeScript error pattern from architecture</subtask>
+        </subtasks>
+      </task>
+      <task id="3" ac="2,5,6">
+        <description>Implement RetryableError class</description>
+        <subtasks>
+          <subtask>Extend QAError</subtask>
+          <subtask>Document use case (network/timeout errors)</subtask>
+          <subtask>Include message and cause parameters</subtask>
+        </subtasks>
+      </task>
+      <task id="4" ac="3,5,6">
+        <description>Implement GameCrashError class</description>
+        <subtasks>
+          <subtask>Extend QAError</subtask>
+          <subtask>Document use case (game crash - fail fast)</subtask>
+          <subtask>Include message and cause parameters</subtask>
+        </subtasks>
+      </task>
+      <task id="5" ac="4,5,6">
+        <description>Implement ValidationError class</description>
+        <subtasks>
+          <subtask>Extend QAError</subtask>
+          <subtask>Document use case (input validation failures)</subtask>
+          <subtask>Include message and cause parameters</subtask>
+        </subtasks>
+      </task>
+      <task id="6" ac="7">
+        <description>Create comprehensive unit tests</description>
+        <subtasks>
+          <subtask>Test QAError instantiation and properties</subtask>
+          <subtask>Test RetryableError instantiation and inheritance</subtask>
+          <subtask>Test GameCrashError instantiation and inheritance</subtask>
+          <subtask>Test ValidationError instantiation and inheritance</subtask>
+          <subtask>Test error message preservation</subtask>
+          <subtask>Test cause parameter handling</subtask>
+          <subtask>Test instanceof checks for all error types</subtask>
+        </subtasks>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="1">Create `src/errors/QAError.ts` with base error class</criterion>
+    <criterion id="2">Create `src/errors/RetryableError.ts` for network/timeout errors</criterion>
+    <criterion id="3">Create `src/errors/GameCrashError.ts` for game crash errors (fail fast)</criterion>
+    <criterion id="4">Create `src/errors/ValidationError.ts` for input validation errors</criterion>
+    <criterion id="5">Each error class includes message and optional cause parameter</criterion>
+    <criterion id="6">Error classes follow pattern from architecture.md</criterion>
+    <criterion id="7">Unit tests cover all error classes</criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>File Structure (lines 79-83)</section>
+        <snippet>src/errors/ directory contains QAError.ts (base error class), RetryableError.ts (network/timeout errors), GameCrashError.ts (game crash errors), ValidationError.ts (input validation errors).</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>Custom Error Classes Pattern (lines 618-648)</section>
+        <snippet>Base QAError extends Error with message and optional cause parameter. Set this.name property. RetryableError for network/timeouts (retry), GameCrashError for crashes (fail fast), ValidationError for invalid inputs (fail immediately). Each extends QAError and sets specific name.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>ADR-004: Custom Error Classes over Generic Errors</section>
+        <snippet>Create typed error classes instead of generic Error. Enables intelligent retry logic based on error type, TypeScript type-checking for error handling, clearer intent, aligns with hybrid error recovery strategy.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document</title>
+        <section>FR-3: Error Detection & Handling</section>
+        <snippet>Browser Agent, Evidence Store, Custom Errors work together. Console monitoring, custom error classes with retry logic. Located in src/browser-agent/, src/evidence-store/, src/errors/.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics.md</path>
+        <title>Epic Breakdown</title>
+        <section>Epic 1: Story 1.4</section>
+        <snippet>Create Custom Error Classes. Typed error classes for different failure scenarios so error handling logic can distinguish between retry-able and fatal errors. 7 acceptance criteria covering all error types.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>tsconfig.json</path>
+        <kind>configuration</kind>
+        <symbol>TypeScript configuration</symbol>
+        <lines>1-15</lines>
+        <reason>TypeScript strict mode configuration. Error classes must be compatible with strict mode typing requirements.</reason>
+      </artifact>
+      <artifact>
+        <path>vitest.config.ts</path>
+        <kind>configuration</kind>
+        <symbol>Vitest configuration</symbol>
+        <lines>1-12</lines>
+        <reason>Testing infrastructure configured in Story 1.3. Use Vitest for error class unit tests.</reason>
+      </artifact>
+      <artifact>
+        <path>package.test.ts</path>
+        <kind>test</kind>
+        <symbol>dependency tests</symbol>
+        <lines>1-74</lines>
+        <reason>Example test pattern with describe blocks and proper structure. Follow similar pattern for error tests.</reason>
+      </artifact>
+      <artifact>
+        <path>vitest.config.test.ts</path>
+        <kind>test</kind>
+        <symbol>configuration tests</symbol>
+        <lines>1-139</lines>
+        <reason>Comprehensive test pattern from Story 1.3 (20 tests). Follow similar thoroughness for error class tests covering all functionality.</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <ecosystem name="Node.js/Bun">
+        <current>
+          <package name="vitest" version="4.0" scope="dev" />
+          <package name="@types/bun" version="latest" scope="dev" />
+          <package name="typescript" version="^5" scope="peer" />
+          <package name="@biomejs/biome" version="2.3.2" scope="dev" />
+          <package name="@vitest/coverage-v8" version="^4.0.6" scope="dev" />
+        </current>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Error classes must follow exact pattern from architecture.md lines 618-648</constraint>
+    <constraint>All error classes must extend QAError base class</constraint>
+    <constraint>Each error class must set this.name property to its class name</constraint>
+    <constraint>Must include message parameter (string) and optional cause parameter (Error)</constraint>
+    <constraint>Must set Object.setPrototypeOf for correct instanceof behavior in TypeScript</constraint>
+    <constraint>Files must use camelCase naming: qaError.ts, retryableError.ts, gameCrashError.ts, validationError.ts</constraint>
+    <constraint>Must be compatible with TypeScript strict mode</constraint>
+    <constraint>No runtime dependencies - TypeScript/JavaScript only</constraint>
+    <constraint>RetryableError is specifically for transient failures that should be retried (network, timeout)</constraint>
+    <constraint>GameCrashError is for critical failures that should fail fast without retry</constraint>
+    <constraint>ValidationError is for input validation failures that should fail immediately</constraint>
+    <constraint>All tests must pass with existing 51 tests (zero regressions)</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>QAError base class</name>
+      <kind>class</kind>
+      <signature>
+export class QAError extends Error {
+  constructor(message: string, public cause?: Error) {
+    super(message)
+    this.name = 'QAError'
+    Object.setPrototypeOf(this, QAError.prototype)
+  }
+}
+      </signature>
+      <path>src/errors/qaError.ts</path>
+    </interface>
+    <interface>
+      <name>RetryableError class</name>
+      <kind>class</kind>
+      <signature>
+export class RetryableError extends QAError {
+  constructor(message: string, cause?: Error) {
+    super(message, cause)
+    this.name = 'RetryableError'
+    Object.setPrototypeOf(this, RetryableError.prototype)
+  }
+}
+      </signature>
+      <path>src/errors/retryableError.ts</path>
+    </interface>
+    <interface>
+      <name>GameCrashError class</name>
+      <kind>class</kind>
+      <signature>
+export class GameCrashError extends QAError {
+  constructor(message: string, cause?: Error) {
+    super(message, cause)
+    this.name = 'GameCrashError'
+    Object.setPrototypeOf(this, GameCrashError.prototype)
+  }
+}
+      </signature>
+      <path>src/errors/gameCrashError.ts</path>
+    </interface>
+    <interface>
+      <name>ValidationError class</name>
+      <kind>class</kind>
+      <signature>
+export class ValidationError extends QAError {
+  constructor(message: string, cause?: Error) {
+    super(message, cause)
+    this.name = 'ValidationError'
+    Object.setPrototypeOf(this, ValidationError.prototype)
+  }
+}
+      </signature>
+      <path>src/errors/validationError.ts</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Testing framework is Vitest 4.0 (configured in Story 1.3). Follow comprehensive testing pattern from Story 1.3 with describe blocks for organization. Tests should cover instantiation, inheritance chain (instanceof checks), message preservation, cause parameter handling, and TypeScript type compatibility. Test co-location: create errors.test.ts in src/errors/ directory alongside error classes.
+    </standards>
+    <locations>
+      <location>src/errors/errors.test.ts (comprehensive error class tests)</location>
+      <location>Alternatively: individual test files (qaError.test.ts, retryableError.test.ts, etc.)</location>
+    </locations>
+    <ideas>
+      <idea ac="1">Test QAError can be instantiated with message only</idea>
+      <idea ac="1,5">Test QAError can be instantiated with message and cause</idea>
+      <idea ac="1">Test QAError sets name property to 'QAError'</idea>
+      <idea ac="1">Test QAError instanceof Error returns true</idea>
+      <idea ac="1">Test QAError instanceof QAError returns true</idea>
+      <idea ac="2">Test RetryableError extends QAError (instanceof checks)</idea>
+      <idea ac="2">Test RetryableError sets name property to 'RetryableError'</idea>
+      <idea ac="2,5">Test RetryableError preserves message and cause</idea>
+      <idea ac="3">Test GameCrashError extends QAError (instanceof checks)</idea>
+      <idea ac="3">Test GameCrashError sets name property to 'GameCrashError'</idea>
+      <idea ac="3,5">Test GameCrashError preserves message and cause</idea>
+      <idea ac="4">Test ValidationError extends QAError (instanceof checks)</idea>
+      <idea ac="4">Test ValidationError sets name property to 'ValidationError'</idea>
+      <idea ac="4,5">Test ValidationError preserves message and cause</idea>
+      <idea ac="5">Test cause parameter is optional (undefined when not provided)</idea>
+      <idea ac="6">Test all error classes match architecture.md pattern</idea>
+      <idea ac="7">Test error stack traces are preserved</idea>
+    </ideas>
+  </tests>
+</story-context>

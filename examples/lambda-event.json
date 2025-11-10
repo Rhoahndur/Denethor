@@ -1,0 +1,6 @@
+{
+  "_comment": "Example AWS Lambda event for Denethor",
+  "_usage": "aws lambda invoke --function-name browsergame-qa --payload file://examples/lambda-event.json response.json",
+
+  "body": "{\"gameUrl\":\"https://example.com/game.html\",\"maxActions\":15,\"sessionTimeout\":240000}"
+}

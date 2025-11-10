@@ -1,0 +1,2103 @@
+/**
+ * QA Orchestrator - Main coordinator for end-to-end game testing.
+ *
+ * This module coordinates all components (EvidenceStore, BrowserAgent,
+ * AIEvaluator, ReportGenerator) to execute complete QA test flows.
+ * Handles test lifecycle, error recovery, and timeout enforcement.
+ *
+ * @module qaOrchestrator
+ *
+ * @example
+ * ```typescript
+ * import { QAOrchestrator } from '@/orchestrator/qaOrchestrator';
+ *
+ * const orchestrator = new QAOrchestrator({
+ *   gameUrl: 'https://example.com/game',
+ *   maxActions: 20,
+ *   sessionTimeout: 60000
+ * });
+ *
+ * const result = await orchestrator.runTest();
+ * console.log(result.report.scores.overallPlayability);
+ * ```
+ */
+
+import { randomUUID } from "node:crypto";
+import { AIEvaluator } from "@/ai-evaluator/aiEvaluator";
+import {
+  executeHybridStrategy,
+  type StrategyResult,
+} from "@/browser-agent/actionStrategy";
+import { BrowserAgent, type GameType } from "@/browser-agent/browserAgent";
+import {
+  UnstickStrategyExecutor,
+  type UnstickContext,
+} from "@/browser-agent/unstickStrategies";
+import { GameCrashError } from "@/errors/gameCrashError";
+import { ValidationError } from "@/errors/validationError";
+import { EvidenceStore } from "@/evidence-store/evidenceStore";
+import {
+  ReportGenerator,
+  type ReportPaths,
+} from "@/report-generator/reportGenerator";
+import type { Action as ReportAction, QAReport } from "@/types";
+import type { DOMAnalysis } from "@/types/qaReport";
+import type { Action } from "@/browser-agent/heuristics/types";
+import { logger } from "@/utils/logger";
+import { ProgressDetector, type ProgressMetrics } from "@/utils/progressDetector";
+import { getVersion } from "@/utils/version";
+import { GameStateDetector, GameState } from "@/browser-agent/gameStateDetector";
+import { GameplayController } from "@/browser-agent/gameplayController";
+
+const log = logger.child({ component: "QAOrchestrator" });
+
+/**
+ * Configuration for QA Orchestrator.
+ */
+export interface QAOrchestratorConfig {
+  /** URL of the game to test */
+  gameUrl: string;
+  /** Maximum session timeout in milliseconds (default: 300000 = 5 minutes) */
+  sessionTimeout?: number;
+  /** Maximum total test execution time in milliseconds (default: 300000 = 5 minutes) */
+  maxDuration?: number;
+  /** Maximum number of actions to execute (default: 20) */
+  maxActions?: number;
+  /** Output directory for test results (default: './output') */
+  outputDir?: string;
+  /**
+   * Optional hint about game input controls to guide testing strategy.
+   * Can be a semantic description (e.g., "Arrow keys for movement, spacebar to jump")
+   * or JavaScript snippet from game's input schema. Helps AI understand expected controls.
+   *
+   * @example "WASD for movement, E to interact, mouse click for menu navigation"
+   * @example "Arrow keys control character, spacebar jumps, touch controls for mobile"
+   */
+  inputHint?: string;
+  /**
+   * Configuration for game loading warmup phase.
+   * Some games require periodic interaction during loading or have slow asset loading.
+   * Warmup performs systematic clicks to ensure the game loads properly.
+   *
+   * **Progressive Warmup (Default):**
+   * - If no warmup config provided, uses intelligent progressive strategy
+   * - Up to 3 rounds × 20s = 60s max
+   * - Stops early if game becomes responsive (saves time!)
+   * - Detects responsiveness via screenshot changes + DOM updates
+   *
+   * **Legacy Warmup:**
+   * - If explicit cycles/cycleDuration provided, uses fixed strategy
+   * - No early stopping, runs all cycles regardless
+   *
+   * @default { enabled: true } (progressive warmup: 3×20s with early stopping)
+   *
+   * @example
+   * ```typescript
+   * // Progressive warmup (default - recommended!)
+   * warmup: { enabled: true }
+   * // Up to 60s, stops early if responsive
+   *
+   * // Legacy warmup
+   * warmup: { enabled: true, cycles: 2, cycleDuration: 45000 }
+   * // Fixed 90s, no early stopping
+   *
+   * // Disable warmup
+   * warmup: { enabled: false }
+   * ```
+   */
+  warmup?: {
+    /** Whether to enable warmup phase (default: true) */
+    enabled?: boolean;
+    /**
+     * Number of warmup cycles (optional).
+     * - If not provided: Uses progressive warmup (3 rounds × 20s with early stopping)
+     * - If provided: Uses legacy warmup (fixed cycles, no early stopping)
+     * @default undefined (progressive mode)
+     */
+    cycles?: number;
+    /**
+     * Duration of each cycle in ms (optional).
+     * - If not provided: Uses progressive warmup (20s per round)
+     * - If provided: Uses legacy warmup (fixed duration, no early stopping)
+     * @default undefined (progressive mode)
+     */
+    cycleDuration?: number;
+    /** Interval between clicks in ms (default: 2000 = 2s) */
+    clickInterval?: number;
+  };
+  /**
+   * Optional manual game type override.
+   * If provided, skips auto-detection and uses the specified type.
+   * If not provided, auto-detects game type from page analysis.
+   *
+   * Valid types:
+   * - "platformer": Side-scrolling, jumping games
+   * - "clicker": Idle/incremental games
+   * - "puzzle": Match-3, tile-based puzzles
+   * - "visual-novel": Story-driven narrative games
+   * - "shooter": Action games with shooting
+   * - "racing": Driving/racing games
+   * - "rpg": Role-playing games
+   * - "strategy": Strategy, tower defense
+   * - "arcade": Classic arcade games
+   * - "card": Card games
+   * - "sports": Sports games
+   * - "simulation": Simulation games
+   * - "generic": Fallback for other types
+   *
+   * @example "platformer"
+   * @example "visual-novel"
+   */
+  gameType?: GameType;
+}
+
+/**
+ * Result of running a QA test.
+ */
+export interface QATestResult {
+  /** Complete QA report */
+  report: QAReport;
+  /** Paths to generated report files */
+  reportPaths: ReportPaths;
+}
+
+/**
+ * QA Orchestrator - coordinates end-to-end test execution.
+ *
+ * This class is the main entry point for running QA tests. It:
+ * 1. Creates and initializes EvidenceStore
+ * 2. Creates and connects BrowserAgent to Browserbase
+ * 3. Navigates to game URL
+ * 4. Detects game type
+ * 5. Executes test actions using hybrid strategy
+ * 6. Captures evidence throughout
+ * 7. Closes browser session
+ * 8. Uses AIEvaluator to analyze evidence
+ * 9. Uses ReportGenerator to create all report formats
+ * 10. Returns test results with report paths
+ *
+ * @example
+ * ```typescript
+ * const orchestrator = new QAOrchestrator({
+ *   gameUrl: 'https://game.com',
+ *   maxActions: 15
+ * });
+ *
+ * try {
+ *   const result = await orchestrator.runTest();
+ *   console.log(`Test completed! Score: ${result.report.scores.overallPlayability}`);
+ * } catch (error) {
+ *   console.error('Test failed:', error);
+ * }
+ * ```
+ */
+export class QAOrchestrator {
+  /** Configuration for this orchestrator */
+  private readonly config: Required<Omit<QAOrchestratorConfig, "inputHint" | "warmup" | "gameType">> &
+    Pick<QAOrchestratorConfig, "inputHint" | "gameType"> & {
+      warmup: {
+        enabled: boolean;
+        cycles?: number;          // Optional: undefined triggers progressive warmup
+        cycleDuration?: number;   // Optional: undefined triggers progressive warmup
+        clickInterval: number;
+      };
+    };
+
+  /** Test start time for duration tracking */
+  private startTime: number = 0;
+
+  /** Unique test identifier (generated on construction) */
+  private readonly testId: string;
+
+  /** Fast mode state (enabled after warmup for repetitive games) */
+  private fastModeEnabled: boolean = false;
+
+  /** Previous screenshot for similarity detection */
+  private previousScreenshot: Buffer | undefined = undefined;
+
+  /** Canvas/iframe info for fast clicking */
+  private canvasInfo: { x: number; y: number; width: number; height: number } | undefined = undefined;
+
+  /**
+   * Creates a new QA Orchestrator instance.
+   *
+   * Validates configuration and sets defaults for optional parameters.
+   *
+   * @param config - Orchestrator configuration
+   * @throws {ValidationError} If gameUrl is invalid or missing
+   *
+   * @example
+   * ```typescript
+   * const orchestrator = new QAOrchestrator({
+   *   gameUrl: 'https://example.com/game.html'
+   * });
+   * ```
+   */
+  constructor(config: QAOrchestratorConfig) {
+    // Validate gameUrl
+    this.validateGameUrl(config.gameUrl);
+
+    // Validate gameType if provided
+    if (config.gameType) {
+      this.validateGameType(config.gameType);
+    }
+
+    // Set configuration with defaults
+    this.config = {
+      gameUrl: config.gameUrl,
+      sessionTimeout: config.sessionTimeout ?? 300000, // 5 minutes
+      maxDuration: config.maxDuration ?? 300000, // 5 minutes
+      maxActions: config.maxActions ?? 20,
+      outputDir: config.outputDir ?? "./output",
+      inputHint: config.inputHint,
+      gameType: config.gameType,
+      warmup: {
+        enabled: config.warmup?.enabled ?? true,
+        // IMPORTANT: Leave cycles and cycleDuration undefined if not provided
+        // This triggers progressive warmup (3×20s with early stopping)
+        // If user explicitly provides values, use legacy warmup (no early stopping)
+        cycles: config.warmup?.cycles,
+        cycleDuration: config.warmup?.cycleDuration,
+        clickInterval: config.warmup?.clickInterval ?? 2000, // 2 seconds
+      },
+    };
+
+    // Generate unique test ID
+    this.testId = randomUUID();
+
+    log.info(
+      {
+        testId: this.testId,
+        gameUrl: this.config.gameUrl,
+        sessionTimeout: this.config.sessionTimeout,
+        maxDuration: this.config.maxDuration,
+        maxActions: this.config.maxActions,
+      },
+      "QAOrchestrator instance created",
+    );
+  }
+
+  /**
+   * Validates the game type.
+   *
+   * Ensures the provided game type is one of the supported types.
+   *
+   * @param gameType - Game type to validate
+   * @throws {ValidationError} If game type is invalid
+   */
+  private validateGameType(gameType: string): void {
+    const validTypes: GameType[] = [
+      "platformer",
+      "clicker",
+      "puzzle",
+      "visual-novel",
+      "shooter",
+      "racing",
+      "rpg",
+      "strategy",
+      "arcade",
+      "card",
+      "sports",
+      "simulation",
+      "generic",
+    ];
+
+    if (!validTypes.includes(gameType as GameType)) {
+      throw new ValidationError(
+        `Invalid game type: "${gameType}". Valid types are: ${validTypes.join(", ")}`,
+      );
+    }
+  }
+
+  /**
+   * Validates the game URL format.
+   *
+   * Ensures URL is valid HTTP/HTTPS and not pointing to internal/private networks.
+   * Implements SSRF protection as per architecture requirements.
+   *
+   * @param url - URL to validate
+   * @throws {ValidationError} If URL is invalid or disallowed
+   */
+  private validateGameUrl(url: string): void {
+    try {
+      const parsed = new URL(url);
+
+      // Only allow HTTP/HTTPS protocols
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new ValidationError("Only HTTP/HTTPS URLs are allowed");
+      }
+
+      // Prevent SSRF attacks - block internal/private URLs
+      const hostname = parsed.hostname.toLowerCase();
+      if (
+        hostname === "localhost" ||
+        hostname.startsWith("192.168.") ||
+        hostname.startsWith("10.") ||
+        hostname.startsWith("172.16.") ||
+        hostname.startsWith("127.") ||
+        hostname === "0.0.0.0" ||
+        hostname === "[::]"
+      ) {
+        throw new ValidationError(
+          "Internal/private URLs are not allowed for security reasons",
+        );
+      }
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        throw error;
+      }
+      throw new ValidationError(
+        `Invalid game URL: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
+    }
+  }
+
+  /**
+   * Checks if the game URL is reachable via network request.
+   *
+   * Performs a HEAD request (or GET if HEAD is blocked) to verify the URL
+   * exists and is accessible before launching expensive browser sessions.
+   *
+   * @param url - URL to check
+   * @throws {ValidationError} If URL is not reachable or returns error status
+   */
+  private async checkUrlReachability(url: string): Promise<void> {
+    log.info({ testId: this.testId, url }, "Checking URL reachability");
+
+    try {
+      // Try HEAD request first (faster, doesn't download content)
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "HEAD",
+          redirect: "follow",
+          signal: AbortSignal.timeout(10000), // 10s timeout
+        });
+      } catch (headError) {
+        // Some servers block HEAD requests, try GET instead
+        log.debug(
+          { testId: this.testId, error: headError },
+          "HEAD request failed, trying GET",
+        );
+        response = await fetch(url, {
+          method: "GET",
+          redirect: "follow",
+          signal: AbortSignal.timeout(10000),
+        });
+      }
+
+      // Check HTTP status
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new ValidationError(
+            `Game URL not found (404): ${url}. Please check the URL is correct.`,
+          );
+        } else if (response.status === 403) {
+          throw new ValidationError(
+            `Access forbidden (403): ${url}. The URL may require authentication or block automated access.`,
+          );
+        } else if (response.status >= 500) {
+          throw new ValidationError(
+            `Server error (${response.status}): ${url}. The game server may be down.`,
+          );
+        } else {
+          throw new ValidationError(
+            `URL returned error status ${response.status}: ${url}`,
+          );
+        }
+      }
+
+      log.info(
+        {
+          testId: this.testId,
+          url,
+          status: response.status,
+          contentType: response.headers.get("content-type"),
+        },
+        "URL is reachable",
+      );
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        throw error;
+      }
+
+      // Network errors (DNS, timeout, connection refused)
+      const err = error instanceof Error ? error : new Error(String(error));
+      if (err.name === "TimeoutError" || err.message.includes("timeout")) {
+        throw new ValidationError(
+          `Connection timeout: ${url}. The server did not respond within 10 seconds.`,
+        );
+      } else if (
+        err.message.includes("ENOTFOUND") ||
+        err.message.includes("getaddrinfo")
+      ) {
+        throw new ValidationError(
+          `DNS resolution failed: ${url}. The domain does not exist or cannot be reached.`,
+        );
+      } else if (
+        err.message.includes("ECONNREFUSED") ||
+        err.message.includes("connection refused")
+      ) {
+        throw new ValidationError(
+          `Connection refused: ${url}. The server is not accepting connections.`,
+        );
+      } else {
+        throw new ValidationError(
+          `Network error checking URL: ${err.message}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Runs the complete QA test flow.
+   *
+   * This is the main orchestration method that coordinates all components:
+   * 1. Setup: Create evidence store and browser agent
+   * 2. Browser automation: Navigate, detect game type, execute actions
+   * 3. Cleanup: Close browser session (guaranteed via try/finally)
+   * 4. AI Evaluation: Analyze collected evidence
+   * 5. Report Generation: Create JSON, Markdown, and HTML reports
+   *
+   * @returns Promise resolving to test results with report and file paths
+   * @throws {ValidationError} If configuration is invalid
+   * @throws {GameCrashError} If game crashes during testing
+   * @throws {Error} For other failures
+   *
+   * @example
+   * ```typescript
+   * const orchestrator = new QAOrchestrator({ gameUrl: 'https://game.com' });
+   * const result = await orchestrator.runTest();
+   *
+   * if (result.report.scores.overallPlayability > 80) {
+   *   console.log('Game passed QA!');
+   * }
+   * ```
+   */
+  async runTest(): Promise<QATestResult> {
+    this.startTime = Date.now();
+
+    log.info(
+      {
+        testId: this.testId,
+        gameUrl: this.config.gameUrl,
+      },
+      "Starting QA test execution",
+    );
+
+    // 0. Validate URL is reachable before starting expensive operations
+    log.info({ testId: this.testId }, "Validating game URL reachability");
+    await this.checkUrlReachability(this.config.gameUrl);
+
+    // 1. Setup: Create and initialize evidence store
+    const evidenceStore = new EvidenceStore(this.testId, this.config.outputDir);
+    await evidenceStore.initialize();
+
+    log.debug({ testId: this.testId }, "Evidence store initialized");
+
+    // 2. Create browser agent
+    const browserAgent = new BrowserAgent(this.testId, evidenceStore);
+
+    // Track actions for report
+    const actions: ReportAction[] = [];
+
+    // Track browser settings for report
+    let browserSettings: {
+      browser: string;
+      viewport: { width: number; height: number };
+      arguments: string[];
+      device: string;
+      locale: string;
+    } | null = null;
+
+    // Track progress metrics for report
+    let progressMetrics: {
+      uniqueStates: number;
+      inputSuccessRate: number;
+      totalActions: number;
+      successfulActions: number;
+    } | null = null;
+
+    try {
+      // 3. Browser automation
+      log.info({ testId: this.testId }, "Starting browser automation");
+
+      // Create browser session
+      await browserAgent.createSession();
+
+      // Capture browser settings for report
+      browserSettings = browserAgent.getBrowserSettings();
+
+      actions.push({
+        type: "create-session",
+        timestamp: new Date().toISOString(),
+        success: true,
+        details: "Browserbase session created",
+      });
+
+      // Navigate to game
+      await browserAgent.navigateToGame(this.config.gameUrl);
+      actions.push({
+        type: "navigate",
+        timestamp: new Date().toISOString(),
+        success: true,
+        details: `Navigated to ${this.config.gameUrl}`,
+      });
+
+      // Warmup phase: help games load by periodic clicking
+      if (this.config.warmup.enabled) {
+        log.info(
+          {
+            testId: this.testId,
+            cycles: this.config.warmup.cycles,
+            cycleDuration: this.config.warmup.cycleDuration,
+            clickInterval: this.config.warmup.clickInterval,
+          },
+          "Starting game loading warmup phase",
+        );
+
+        await browserAgent.warmupGameLoading({
+          cycles: this.config.warmup.cycles,
+          cycleDuration: this.config.warmup.cycleDuration,
+          clickInterval: this.config.warmup.clickInterval,
+        });
+
+        actions.push({
+          type: "warmup",
+          timestamp: new Date().toISOString(),
+          success: true,
+          details: `Completed warmup: ${this.config.warmup.cycles} cycles × ${this.config.warmup.cycleDuration}ms`,
+        });
+
+        log.info({ testId: this.testId }, "Game loading warmup phase completed");
+
+        // Refresh DOM analysis and object registry after warmup
+        // The game may have loaded new UI elements during warmup that weren't present initially
+        log.info(
+          { testId: this.testId },
+          "Re-analyzing DOM after warmup to capture dynamically loaded UI",
+        );
+
+        await browserAgent.refreshDOMAndRegistry();
+
+        actions.push({
+          type: "dom-refresh",
+          timestamp: new Date().toISOString(),
+          success: true,
+          details: "DOM analysis and object registry refreshed after warmup",
+        });
+
+        log.info(
+          { testId: this.testId },
+          "Post-warmup DOM refresh complete - registry now includes fully loaded game UI",
+        );
+      } else {
+        log.info({ testId: this.testId }, "Warmup phase disabled, skipping");
+      }
+
+      // Detect and click start button if this is a title/menu screen
+      log.info({ testId: this.testId }, "Checking for start/title screen");
+      const startScreenResult = await this.detectAndClickStartButton(
+        browserAgent,
+      );
+      if (startScreenResult) {
+        actions.push(...startScreenResult);
+      }
+
+      // Detect or use manual game type
+      let gameType: GameType;
+      if (this.config.gameType) {
+        // Manual override provided - skip auto-detection
+        gameType = this.config.gameType;
+        log.info(
+          {
+            testId: this.testId,
+            gameType,
+            method: "manual",
+          },
+          "Using manually specified game type (skipping auto-detection)",
+        );
+
+        actions.push({
+          type: "set-game-type",
+          timestamp: new Date().toISOString(),
+          success: true,
+          details: `Manually specified: ${gameType}`,
+        });
+      } else {
+        // Auto-detect game type
+        const gameTypeResult = await browserAgent.detectGameType();
+        gameType = gameTypeResult.gameType;
+
+        log.info(
+          {
+            testId: this.testId,
+            gameType: gameTypeResult.gameType,
+            confidence: gameTypeResult.confidence,
+            method: gameTypeResult.method,
+          },
+          "Game type detected",
+        );
+
+        actions.push({
+          type: "detect-game-type",
+          timestamp: new Date().toISOString(),
+          success: true,
+          details: `Detected ${gameTypeResult.gameType} (confidence: ${gameTypeResult.confidence}%)`,
+        });
+      }
+
+      // Execute test actions
+      // Note: This will be implemented in Story 6.2
+      // For now, we'll call a placeholder method
+      const testResult = await this.executeTestActions(
+        browserAgent,
+        gameType,
+      );
+      actions.push(...testResult.actions);
+
+      // Store progress metrics for report
+      progressMetrics = {
+        uniqueStates: testResult.progressMetrics.uniqueGameStates,
+        inputSuccessRate: testResult.progressMetrics.progressScore,
+        totalActions: testResult.progressMetrics.inputsAttempted,
+        successfulActions: testResult.progressMetrics.inputsSuccessful,
+      };
+
+      log.info(
+        {
+          testId: this.testId,
+          actionsExecuted: testResult.actions.length,
+        },
+        "Test actions completed",
+      );
+    } finally {
+      // 4. Cleanup: Ensure browser session is closed
+      try {
+        await browserAgent.closeSession();
+        actions.push({
+          type: "close-session",
+          timestamp: new Date().toISOString(),
+          success: true,
+          details: "Browser session closed",
+        });
+        log.debug({ testId: this.testId }, "Browser session closed");
+      } catch (error) {
+        log.error(
+          {
+            testId: this.testId,
+            error,
+          },
+          "Failed to close browser session",
+        );
+        actions.push({
+          type: "close-session",
+          timestamp: new Date().toISOString(),
+          success: false,
+          details: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+
+    // 5. AI Evaluation
+    log.info({ testId: this.testId }, "Starting AI evaluation");
+
+    const evidence = await evidenceStore.getAllEvidence();
+    const evaluator = new AIEvaluator();
+    const evaluation = await evaluator.evaluatePlayability(evidence);
+
+    log.info(
+      {
+        testId: this.testId,
+        overallPlayability: evaluation.scores.overallPlayability,
+        confidence: evaluation.confidence,
+      },
+      "AI evaluation completed",
+    );
+
+    // Detect issues
+    const issues = await evaluator.detectIssues(evidence, evaluation.scores);
+
+    log.info(
+      {
+        testId: this.testId,
+        issuesCount: issues.length,
+      },
+      "Issue detection completed",
+    );
+
+    // 6. Build QA Report
+    const duration = Math.floor((Date.now() - this.startTime) / 1000); // seconds
+
+    // Calculate timing metrics from actions with timing data
+    const timedActions = actions.filter((action) => action.durationMs !== undefined);
+    const timingMetrics =
+      timedActions.length > 0
+        ? {
+            totalTimedActions: timedActions.length,
+            averageDurationMs: Math.round(
+              timedActions.reduce((sum, action) => sum + (action.durationMs || 0), 0) /
+                timedActions.length,
+            ),
+            minDurationMs: Math.min(
+              ...timedActions.map((action) => action.durationMs || Number.MAX_SAFE_INTEGER),
+            ),
+            maxDurationMs: Math.max(...timedActions.map((action) => action.durationMs || 0)),
+            totalDurationMs: timedActions.reduce((sum, action) => sum + (action.durationMs || 0), 0),
+            slowActionsCount: timedActions.filter((action) => (action.durationMs || 0) > 5000)
+              .length,
+          }
+        : undefined;
+
+    const report: QAReport = {
+      meta: {
+        testId: this.testId,
+        gameUrl: this.config.gameUrl,
+        timestamp: new Date(this.startTime).toISOString(),
+        duration,
+        agentVersion: getVersion(),
+        browserSettings: browserSettings || {
+          browser: "chrome",
+          viewport: { width: 1280, height: 720 },
+          arguments: [],
+          device: "desktop",
+          locale: "en-US",
+        },
+      },
+      status:
+        evaluation.scores.overallPlayability >= 40 ? "success" : "failure",
+      scores: evaluation.scores,
+      evaluation: {
+        reasoning: evaluation.reasoning,
+        confidence: evaluation.confidence,
+      },
+      issues,
+      evidence: {
+        screenshots: evidence.screenshots,
+        logs: {
+          console: evidence.logs.console || "",
+          actions: evidence.logs.actions || "",
+          errors: evidence.logs.errors || "",
+        },
+      },
+      actions,
+      progressMetrics: progressMetrics || undefined,
+      timingMetrics,
+    };
+
+    log.info(
+      {
+        testId: this.testId,
+        status: report.status,
+        duration,
+      },
+      "QA report built",
+    );
+
+    // 7. Generate reports
+    log.info({ testId: this.testId }, "Generating reports");
+
+    const generator = new ReportGenerator(report, evidenceStore);
+    const reportPaths = await generator.generateAll();
+
+    log.info(
+      {
+        testId: this.testId,
+        reportPaths,
+        duration,
+      },
+      "QA test execution completed successfully",
+    );
+
+    return {
+      report,
+      reportPaths,
+    };
+  }
+
+  /**
+   * Executes test actions using the hybrid strategy.
+  /**
+   * Detects if the current screen is a start/title/menu screen and clicks
+   * the start button if found.
+   *
+   * Uses Vision API to analyze the screenshot and DOM to intelligently detect
+   * start screens and locate the start button (DOM or canvas-rendered).
+   *
+   * @param browserAgent - Browser agent instance
+   * @returns Actions taken (or empty array if no start screen detected)
+   */
+  private async detectAndClickStartButton(
+    browserAgent: BrowserAgent,
+  ): Promise<Array<{ type: string; timestamp: string; success: boolean; details: string }>> {
+    const actions: Array<{ type: string; timestamp: string; success: boolean; details: string }> = [];
+
+    try {
+      // Import VisionAnalyzer
+      const { VisionAnalyzer } = await import("@/browser-agent/visionAnalyzer");
+      const visionAnalyzer = new VisionAnalyzer();
+
+      // Capture screenshot (iframe-isolated if available)
+      const screenshotData = await browserAgent.captureGameScreenshot();
+      const screenshot = screenshotData.screenshot;
+
+      // Get DOM analysis for context
+      const domAnalysis = browserAgent.getDOMAnalysis();
+
+      // Detect start screen
+      const result = await visionAnalyzer.detectStartScreen(
+        screenshot,
+        domAnalysis || undefined,
+      );
+
+      log.info(
+        {
+          testId: this.testId,
+          isStartScreen: result.isStartScreen,
+          confidence: result.confidence,
+          startButton: result.startAction?.targetDescription,
+        },
+        "Start screen detection result"
+      );
+
+      actions.push({
+        type: "detect-start-screen",
+        timestamp: new Date().toISOString(),
+        success: true,
+        details: `${result.isStartScreen ? "Start screen detected" : "Not a start screen"} (confidence: ${result.confidence}%)`,
+      });
+
+      // If start screen detected with high confidence, click the start button
+      if (result.isStartScreen && result.startAction && result.confidence >= 70) {
+        log.info(
+          {
+            testId: this.testId,
+            action: result.startAction.nextAction,
+            hasCoordinates: !!result.startAction.clickCoordinates,
+          },
+          "Clicking start button to begin game"
+        );
+
+        // Execute the start action
+        try {
+          if (result.startAction.clickCoordinates) {
+            // Canvas-rendered button - use coordinates
+            await browserAgent.executeAction({
+              type: "click",
+              target: result.startAction.nextAction,
+              coordinates: result.startAction.clickCoordinates,
+            });
+          } else {
+            // DOM button - use description
+            await browserAgent.executeAction({
+              type: "click",
+              target: result.startAction.nextAction,
+            });
+          }
+
+          actions.push({
+            type: "click-start-button",
+            timestamp: new Date().toISOString(),
+            success: true,
+            details: `Clicked start button: ${result.startAction.targetDescription}`,
+          });
+
+          // Wait a moment for the game to transition
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+
+          log.info({ testId: this.testId }, "Start button clicked, waiting for game to load");
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          log.warn(
+            {
+              testId: this.testId,
+              error: err.message,
+            },
+            "Failed to click start button, continuing anyway"
+          );
+
+          actions.push({
+            type: "click-start-button",
+            timestamp: new Date().toISOString(),
+            success: false,
+            details: `Failed to click start button: ${err.message}`,
+          });
+        }
+      } else if (result.isStartScreen && result.confidence < 70) {
+        log.info(
+          {
+            testId: this.testId,
+            confidence: result.confidence,
+          },
+          "Start screen detected but confidence too low, skipping click"
+        );
+      }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      log.error(
+        {
+          testId: this.testId,
+          error: err.message,
+          stack: err.stack,
+        },
+        "Start screen detection failed"
+      );
+
+      actions.push({
+        type: "detect-start-screen",
+        timestamp: new Date().toISOString(),
+        success: false,
+        details: `Start screen detection failed: ${err.message}`,
+      });
+    }
+
+    return actions;
+  }
+
+  /**
+   * Executes test actions for the game.
+   *
+   * Executes actions in a loop until:
+   * - Maximum actions reached (default: 20)
+   * - Timeout reached (30 seconds default)
+   * - Game crashes (GameCrashError thrown)
+   *
+   * Uses the hybrid strategy to determine each action:
+   * 1. Try heuristics (fast, free)
+   * 2. Use vision analysis if heuristics uncertain
+   * 3. Execute action via browser agent
+   * 4. Capture evidence after each action
+   *
+   * @param browserAgent - Browser agent instance
+   * @param gameType - Detected game type
+   * @returns Promise resolving to object with actions and progress metrics
+   */
+  private async executeTestActions(
+    browserAgent: BrowserAgent,
+    gameType: GameType,
+  ): Promise<{
+    actions: ReportAction[];
+    progressMetrics: {
+      uniqueGameStates: number;
+      progressScore: number;
+      inputsAttempted: number;
+      inputsSuccessful: number;
+      screenshotsWithChanges: number;
+      screenshotsIdentical: number;
+      consecutiveIdentical: number;
+      seenStates: Set<string>;
+    };
+  }> {
+    const actions: ReportAction[] = [];
+    const maxActions = this.config.maxActions;
+
+    // Create progress detector to track screenshot changes
+    const progressDetector = new ProgressDetector();
+
+    // Track consecutive stuck detections for threshold-based unstick
+    let consecutiveStuckDetections = 0;
+    const STUCK_THRESHOLD = 2; // Trigger unstick after 2 detections (6 identical states total)
+
+    // Enable fast mode for repetitive games after warmup
+    if (gameType === "visual-novel" || gameType === "clicker") {
+      this.fastModeEnabled = true;
+
+      // Capture canvas/iframe info for fast clicking
+      const page = browserAgent.getPage();
+      if (page) {
+        const gameElementInfo = await page.evaluate(() => {
+        const itchIframe = document.querySelector('iframe.game_frame') ||
+                          document.querySelector('iframe[src*="hwcdn.net"]') ||
+                          document.querySelector('iframe[src*="itch.zone"]') ||
+                          document.querySelector('iframe[allowfullscreen]');
+
+        if (itchIframe) {
+          const rect = itchIframe.getBoundingClientRect();
+          return {
+            x: rect.left + window.scrollX,
+            y: rect.top + window.scrollY,
+            width: rect.width,
+            height: rect.height,
+          };
+        }
+
+        const canvas = document.querySelector('canvas');
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          return {
+            x: rect.left + window.scrollX,
+            y: rect.top + window.scrollY,
+            width: rect.width,
+            height: rect.height,
+          };
+        }
+
+        return null;
+        });
+
+        if (gameElementInfo) {
+          this.canvasInfo = gameElementInfo;
+          log.info(
+            { testId: this.testId, gameType, canvasInfo: gameElementInfo },
+            "Fast mode enabled for repetitive game type - will use game-specific shortcuts",
+          );
+        } else {
+          log.warn(
+            { testId: this.testId, gameType },
+            "Fast mode requested but no canvas/iframe found - falling back to normal strategy",
+          );
+        }
+      }
+    }
+
+    log.info(
+      {
+        testId: this.testId,
+        gameType,
+        maxActions,
+        fastMode: this.fastModeEnabled,
+      },
+      "Starting test action execution",
+    );
+
+    for (let i = 0; i < maxActions; i++) {
+      // Check max duration (overall test time limit)
+      const totalElapsed = Date.now() - this.startTime;
+      if (totalElapsed > this.config.maxDuration) {
+        log.warn(
+          {
+            testId: this.testId,
+            totalElapsed,
+            maxDuration: this.config.maxDuration,
+            actionsExecuted: i,
+          },
+          "Maximum test duration exceeded - stopping execution",
+        );
+        break;
+      }
+
+      try {
+        log.debug(
+          {
+            testId: this.testId,
+            actionNumber: i + 1,
+            gameType,
+          },
+          "Executing action via hybrid strategy",
+        );
+
+        // Use hybrid strategy to determine next action
+        const page = browserAgent.getPage();
+        if (!page) {
+          log.error(
+            { testId: this.testId },
+            "Page is null, cannot execute actions",
+          );
+          break;
+        }
+
+        let strategyResult: StrategyResult | undefined;
+        let isFirstActionLoading = false;
+
+        // First-action progressive retry logic: Games can take time to load.
+        // Catch GameCrashError on first action and treat as loading signal.
+        if (i === 0) {
+          const waitTimes = [30000, 60000, 60000]; // 30s, 1min, 1min
+          let retryAttempt = 0;
+
+          // Try initial hybrid strategy
+          try {
+            // Get DOM analysis from browser agent if available
+            const domAnalysis = browserAgent.getDOMAnalysis();
+
+            // Build previous actions context (last 3 actions)
+            const recentActions = actions.slice(-3).map((a, idx) => {
+              const actionNum = actions.length - 3 + idx + 1;
+              if (a.details) {
+                return `Action ${actionNum}: ${a.type} (${a.details})`;
+              } else {
+                return `Action ${actionNum}: ${a.type}`;
+              }
+            }).join('; ');
+
+            strategyResult = await executeHybridStrategy(page, {
+              gameType,
+              attempt: i + 1,
+              inputHint: this.config.inputHint,
+              domAnalysis: domAnalysis || undefined,
+              previousAction: recentActions || undefined,
+              objectRegistry: browserAgent.getObjectRegistry(),
+              templateMatcher: browserAgent.getTemplateMatcher(),
+              browserAgent: browserAgent,
+              fastMode: this.fastModeEnabled,
+              previousScreenshot: this.previousScreenshot,
+              canvasInfo: this.canvasInfo,
+            });
+
+            // Update previous screenshot for next iteration (capture game-focused screenshot)
+            const screenshotData = await browserAgent.captureGameScreenshot();
+            this.previousScreenshot = screenshotData.screenshot;
+
+            log.debug(
+              {
+                testId: this.testId,
+                layer: strategyResult.layer,
+                confidence: strategyResult.confidence,
+                actionType: strategyResult.actionType,
+              },
+              "First action - hybrid strategy result",
+            );
+
+            // Handle different first action scenarios
+            // "wait" is a valid action - game is just loading
+            if (strategyResult.actionType === "wait") {
+              log.info(
+                {
+                  testId: this.testId,
+                  confidence: strategyResult.confidence,
+                  reasoning: strategyResult.reasoning,
+                },
+                "First action is wait - game appears to be loading, will wait and retry",
+              );
+
+              // Wait the recommended time (or default 5s)
+              const waitTime = 5000;
+              await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+              // Capture screenshot after waiting to see if anything changed
+              const afterWaitScreenshot = await page.screenshot();
+              await browserAgent
+                .getEvidenceStore()
+                .captureScreenshot(afterWaitScreenshot, "after-initial-wait");
+
+              // Don't enter retry loop - increment attempt counter and continue
+              retryAttempt++;
+              continue; // Skip to next iteration, don't mark as loading
+            }
+
+            // Only treat "unknown" with very low confidence as potential crash
+            if (
+              strategyResult.actionType === "unknown" &&
+              strategyResult.confidence < 40
+            ) {
+              isFirstActionLoading = true;
+              log.warn(
+                {
+                  testId: this.testId,
+                  confidence: strategyResult.confidence,
+                  reasoning: strategyResult.reasoning,
+                },
+                "First action completely uncertain - game may be stuck, will attempt unstick",
+              );
+            }
+
+            // Even if confidence is low, try executing the action
+            // Many times the strategy is correct even with low confidence
+            if (
+              strategyResult.confidence >= 30 &&
+              strategyResult.confidence < 80 &&
+              strategyResult.actionType !== "unknown"
+            ) {
+              log.info(
+                {
+                  testId: this.testId,
+                  actionType: strategyResult.actionType,
+                  confidence: strategyResult.confidence,
+                },
+                "Attempting action despite low confidence - may work anyway",
+              );
+
+              try {
+                const executionResult = await browserAgent.executeAction({
+                  type: strategyResult.actionType,
+                  target: strategyResult.target,
+                  coordinates: strategyResult.clickCoordinates,
+                });
+
+                if (executionResult.success) {
+                  log.info(
+                    { testId: this.testId },
+                    "Low-confidence action succeeded! Continuing normal flow",
+                  );
+                  actions.push({
+                    type: strategyResult.actionType,
+                    timestamp: new Date().toISOString(),
+                    success: true,
+                    details: `${strategyResult.action}, confidence: ${strategyResult.confidence}%`,
+                    durationMs: executionResult.durationMs,
+                    startTime: executionResult.startTime,
+                    endTime: executionResult.endTime,
+                  });
+
+                  // Action worked - don't enter retry loop
+                  isFirstActionLoading = false;
+                  break; // Exit first action loop
+                }
+              } catch (error) {
+                log.warn(
+                  {
+                    testId: this.testId,
+                    error: error instanceof Error ? error.message : String(error),
+                  },
+                  "Low-confidence action failed - will enter retry logic",
+                );
+                // Fall through to retry logic below if we haven't set isFirstActionLoading
+              }
+            }
+          } catch (error) {
+            // On first action, treat GameCrashError as "game is loading"
+            if (error instanceof GameCrashError) {
+              log.info(
+                {
+                  testId: this.testId,
+                  error: error.message,
+                },
+                "First action failed - game may be loading, will retry with progressive waits",
+              );
+              isFirstActionLoading = true;
+            } else {
+              throw error; // Re-throw non-crash errors
+            }
+          }
+
+          // Progressive retry if game appears to be loading
+          while (isFirstActionLoading && retryAttempt < waitTimes.length) {
+            // Check max duration before starting retry
+            const totalElapsed = Date.now() - this.startTime;
+            if (totalElapsed > this.config.maxDuration) {
+              log.warn(
+                {
+                  testId: this.testId,
+                  totalElapsed,
+                  maxDuration: this.config.maxDuration,
+                  retryAttempt: retryAttempt + 1,
+                },
+                "Maximum test duration exceeded during retry - stopping execution",
+              );
+              break;
+            }
+
+            const waitTime = waitTimes[retryAttempt];
+            if (!waitTime) {
+              log.warn(
+                {
+                  testId: this.testId,
+                  retryAttempt,
+                },
+                "Wait time undefined for retry attempt",
+              );
+              break;
+            }
+
+            log.info(
+              {
+                testId: this.testId,
+                retryAttempt: retryAttempt + 1,
+                waitTimeSeconds: waitTime / 1000,
+              },
+              "Game appears to be loading - waiting before retry",
+            );
+
+            // Wait for game to load
+            await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+            // Intelligent unstick using multiple strategies
+            try {
+              log.info(
+                {
+                  testId: this.testId,
+                  retryAttempt: retryAttempt + 1,
+                },
+                "Attempting intelligent unstick strategies",
+              );
+
+              // Get DOM analysis from browser agent
+              const domAnalysis = browserAgent.getDOMAnalysis();
+
+              // Create unstick context with game type
+              const unstickContext: UnstickContext = {
+                testId: this.testId,
+                attemptNumber: retryAttempt + 1,
+                domAnalysis: domAnalysis || {
+                  buttons: [],
+                  links: [],
+                  inputs: [],
+                  canvases: [],
+                  headings: [],
+                  clickableText: [],
+                  viewport: { width: 1280, height: 720 },
+                  interactiveCount: 0,
+                },
+                inputHint: this.config.inputHint,
+                evidenceStore: browserAgent.getEvidenceStore(),
+                gameType, // NEW: Pass game type for context-aware strategies
+              };
+
+              // Execute progressive hybrid unstick strategy sequence
+              const unstickExecutor = UnstickStrategyExecutor.createProgressiveHybrid(gameType);
+              const unstickResult = await unstickExecutor.executeAll(page, unstickContext);
+
+              log.info(
+                {
+                  testId: this.testId,
+                  retryAttempt: retryAttempt + 1,
+                  action: unstickResult.action,
+                  changed: unstickResult.changed,
+                  success: unstickResult.success,
+                },
+                "Unstick strategies complete",
+              );
+
+              // Log the action
+              actions.push({
+                type: "unstick-attempt",
+                timestamp: new Date().toISOString(),
+                success: unstickResult.success && unstickResult.changed,
+                details: unstickResult.action,
+              });
+
+              // If unstick worked (screen changed), will retry hybrid strategy below
+              if (unstickResult.changed) {
+                log.info(
+                  { testId: this.testId, retryAttempt: retryAttempt + 1 },
+                  "Unstick successful - screen changed, will retry hybrid strategy",
+                );
+              }
+            } catch (error) {
+              log.warn(
+                {
+                  testId: this.testId,
+                  retryAttempt: retryAttempt + 1,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+                "Failed to attempt unstick, continuing with retry",
+              );
+            }
+
+            // Retry hybrid strategy
+            try {
+              // Get DOM analysis from browser agent if available
+              const domAnalysis = browserAgent.getDOMAnalysis();
+
+              // Build previous actions context (last 3 actions)
+              const recentActions = actions.slice(-3).map((a, idx) => {
+                const actionNum = actions.length - 3 + idx + 1;
+                if (a.details) {
+                  return `Action ${actionNum}: ${a.type} (${a.details})`;
+                } else {
+                  return `Action ${actionNum}: ${a.type}`;
+                }
+              }).join('; ');
+
+              strategyResult = await executeHybridStrategy(page, {
+                gameType,
+                attempt: i + 1,
+                inputHint: this.config.inputHint,
+                domAnalysis: domAnalysis || undefined,
+                previousAction: recentActions || undefined,
+                objectRegistry: browserAgent.getObjectRegistry(),
+                templateMatcher: browserAgent.getTemplateMatcher(),
+                browserAgent: browserAgent,
+                fastMode: this.fastModeEnabled,
+                previousScreenshot: this.previousScreenshot,
+                canvasInfo: this.canvasInfo,
+              });
+
+              // Update previous screenshot for next iteration (capture game-focused screenshot)
+              const screenshotData = await browserAgent.captureGameScreenshot();
+              this.previousScreenshot = screenshotData.screenshot;
+
+              log.info(
+                {
+                  testId: this.testId,
+                  retryAttempt: retryAttempt + 1,
+                  layer: strategyResult.layer,
+                  confidence: strategyResult.confidence,
+                  actionType: strategyResult.actionType,
+                },
+                "Retry strategy result after waiting and unstick attempt",
+              );
+
+              // Check if we should continue retrying
+              if (
+                strategyResult.actionType !== "wait" &&
+                strategyResult.confidence >= 50
+              ) {
+                isFirstActionLoading = false; // Game loaded!
+                log.info(
+                  {
+                    testId: this.testId,
+                    totalWaitTime:
+                      waitTimes
+                        .slice(0, retryAttempt + 1)
+                        .reduce((a, b) => a + b, 0) / 1000,
+                    retriesUsed: retryAttempt + 1,
+                  },
+                  "Game loaded successfully after waiting and unstick attempts",
+                );
+
+                // Phase 5: Check if we should enter continuous gameplay mode
+                // If game is now playable, use GameplayController for better action execution
+                const stateDetector = new GameStateDetector(page);
+                const domAnalysis = browserAgent.getDOMAnalysis();
+                const afterWaitScreenshot = await page.screenshot();
+
+                // Create empty DOM analysis if none available
+                const emptyDOM: DOMAnalysis = {
+                  buttons: [],
+                  links: [],
+                  inputs: [],
+                  canvases: [],
+                  headings: [],
+                  clickableText: [],
+                  viewport: { width: 1920, height: 1080 },
+                  interactiveCount: 0
+                };
+
+                try {
+                  const stateResult = await stateDetector.detectState(
+                    afterWaitScreenshot,
+                    domAnalysis || emptyDOM,
+                  );
+
+                  log.info(
+                    { testId: this.testId, gameState: stateResult.state, confidence: stateResult.confidence },
+                    "Detected game state after loading",
+                  );
+
+                  // If game is in MENU or PLAYING state, use GameplayController
+                  if (stateResult.state === GameState.MENU || stateResult.state === GameState.PLAYING) {
+                    log.info(
+                      { testId: this.testId, state: stateResult.state },
+                      "Game is playable - activating GameplayController for enhanced testing",
+                    );
+
+                    const gameplayController = new GameplayController(
+                      page,
+                      browserAgent.getEvidenceStore(),
+                      {
+                        maxActions: maxActions - actions.length, // Remaining actions
+                        maxDuration: this.config.maxDuration - (Date.now() - this.startTime),
+                        actionInterval: 1000, // 1 second between actions
+                        inputHint: this.config.inputHint,
+                      }
+                    );
+
+                    const gameplayResult = await gameplayController.play();
+
+                    log.info(
+                      {
+                        testId: this.testId,
+                        actionsExecuted: gameplayResult.actionsExecuted,
+                        finalState: gameplayResult.finalState,
+                        success: gameplayResult.success,
+                      },
+                      "GameplayController completed",
+                    );
+
+                    // Add gameplay metrics to actions
+                    actions.push({
+                      type: "gameplay-session",
+                      timestamp: new Date().toISOString(),
+                      success: gameplayResult.success,
+                      details: `Played game: ${gameplayResult.actionsExecuted} actions, ended in ${gameplayResult.finalState} state (${gameplayResult.endReason})`,
+                    });
+
+                    // Update progress detector with gameplay screenshots (if any)
+                    // Note: GameplayController captures its own screenshots, so we just need to
+                    // record the final state for progress tracking
+                    const finalScreenshot = await page.screenshot();
+                    const finalDOMSnapshot = await page.evaluate(() => document.body.innerText);
+                    progressDetector.recordScreenshot(finalScreenshot, finalDOMSnapshot, "gameplay");
+
+                    // Return early - gameplay controller has done the testing
+                    const progressMetrics = progressDetector.getMetrics();
+                    return { actions, progressMetrics };
+                  }
+                } catch (error) {
+                  log.warn(
+                    {
+                      testId: this.testId,
+                      error: error instanceof Error ? error.message : String(error),
+                    },
+                    "Failed to activate GameplayController, falling back to standard action loop",
+                  );
+                }
+              }
+            } catch (error) {
+              if (error instanceof GameCrashError) {
+                log.info(
+                  {
+                    testId: this.testId,
+                    retryAttempt: retryAttempt + 1,
+                  },
+                  "Retry attempt still shows game loading, continuing...",
+                );
+              } else {
+                throw error; // Re-throw non-crash errors
+              }
+            }
+
+            retryAttempt++;
+          }
+
+          // If still no valid result after all retries, throw the original error
+          if (!strategyResult) {
+            log.warn(
+              {
+                testId: this.testId,
+                totalWaitTime: waitTimes.reduce((a, b) => a + b, 0) / 1000,
+              },
+              "Game still not responsive after all retries - ending test",
+            );
+            throw new GameCrashError(
+              "Game failed to load after 2.5 minutes of waiting (30s + 1min + 1min) and multiple unstick attempts. Possible very slow load, unresponsive game, or requires specific user interaction.",
+            );
+          }
+        } else {
+          // For non-first actions, execute normally
+          // Get DOM analysis from browser agent if available
+          const domAnalysis = browserAgent.getDOMAnalysis();
+
+          // Build previous actions context (last 3 actions)
+          const recentActions = actions.slice(-3).map((a, idx) => {
+            const actionNum = actions.length - 3 + idx + 1;
+            if (a.details) {
+              return `Action ${actionNum}: ${a.type} (${a.details})`;
+            } else {
+              return `Action ${actionNum}: ${a.type}`;
+            }
+          }).join('; ');
+
+          strategyResult = await executeHybridStrategy(page, {
+            gameType,
+            attempt: i + 1,
+            inputHint: this.config.inputHint,
+            domAnalysis: domAnalysis || undefined,
+            previousAction: recentActions || undefined,
+            objectRegistry: browserAgent.getObjectRegistry(),
+            templateMatcher: browserAgent.getTemplateMatcher(),
+            browserAgent: browserAgent,
+            fastMode: this.fastModeEnabled,
+            previousScreenshot: this.previousScreenshot,
+            canvasInfo: this.canvasInfo,
+          });
+
+          // Update previous screenshot for next iteration (capture game-focused screenshot)
+          const screenshotData = await browserAgent.captureGameScreenshot();
+          this.previousScreenshot = screenshotData.screenshot;
+
+          log.debug(
+            {
+              testId: this.testId,
+              layer: strategyResult.layer,
+              confidence: strategyResult.confidence,
+              actionType: strategyResult.actionType,
+            },
+            "Hybrid strategy result",
+          );
+        }
+
+        // Skip if action type is unknown
+        if (strategyResult.actionType === "unknown") {
+          log.warn(
+            { testId: this.testId },
+            "Skipping unknown action type from strategy",
+          );
+          continue;
+        }
+
+        // CRITICAL FIX: Refine click coordinates using DOM elements when available
+        // Vision provides approximate coords (±50px), but DOM elements have precise pixel positions
+        let refinedCoordinates = strategyResult.clickCoordinates;
+
+        // Get DOM analysis for coordinate refinement
+        const currentDOMAnalysis = browserAgent.getDOMAnalysis();
+
+        if (
+          strategyResult.actionType === "click" &&
+          strategyResult.clickCoordinates &&
+          currentDOMAnalysis &&
+          currentDOMAnalysis.buttons.length > 0
+        ) {
+          // Extract key words from vision's recommendation
+          // e.g., "Click the Start button" → ["start"]
+          const visionText = strategyResult.action.toLowerCase();
+          const visionWords = visionText
+            .replace(/^click\s+(the\s+)?/, '')
+            .replace(/\s+button$/, '')
+            .split(/\s+/)
+            .filter(word => word.length > 2); // Ignore short words like "the", "a"
+
+          log.debug(
+            {
+              testId: this.testId,
+              visionAction: strategyResult.action,
+              visionWords,
+              availableButtons: currentDOMAnalysis.buttons.length,
+            },
+            "Attempting to match vision recommendation with DOM elements",
+          );
+
+          // Try to find a matching DOM button
+          let bestMatch: typeof currentDOMAnalysis.buttons[0] | null = null;
+          let bestScore = 0;
+
+          for (const button of currentDOMAnalysis.buttons) {
+            if (!button.visible) continue; // Skip hidden buttons
+
+            const buttonText = button.text.toLowerCase();
+
+            // Calculate match score (how many vision words appear in button text)
+            let score = 0;
+            for (const word of visionWords) {
+              if (buttonText.includes(word)) {
+                score++;
+              }
+            }
+
+            // Also check exact match
+            if (buttonText === visionWords.join(' ')) {
+              score += 10; // Bonus for exact match
+            }
+
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = button;
+            }
+          }
+
+          // Use DOM coordinates if we found a good match
+          if (bestMatch && bestScore > 0) {
+            // Use DOM element's precise center coordinates
+            const domX = bestMatch.position.x + bestMatch.position.width / 2;
+            const domY = bestMatch.position.y + bestMatch.position.height / 2;
+
+            log.info(
+              {
+                testId: this.testId,
+                visionAction: strategyResult.action,
+                matchedButton: bestMatch.text,
+                visionCoords: strategyResult.clickCoordinates,
+                domCoords: { x: Math.round(domX), y: Math.round(domY) },
+                improvement: {
+                  xDiff: Math.abs(domX - strategyResult.clickCoordinates.x),
+                  yDiff: Math.abs(domY - strategyResult.clickCoordinates.y),
+                },
+              },
+              "🎯 Refined click coordinates using DOM element - much more precise!",
+            );
+
+            refinedCoordinates = {
+              x: Math.round(domX),
+              y: Math.round(domY),
+            };
+          } else {
+            log.debug(
+              {
+                testId: this.testId,
+                visionAction: strategyResult.action,
+                availableButtons: currentDOMAnalysis.buttons.map((b) => b.text),
+              },
+              "No DOM element match found - using vision coordinates",
+            );
+          }
+        }
+
+        // Execute the action via browser agent
+        // For keyboard actions from vision, map to specific key
+        let actionToExecute: Action = {
+          type: strategyResult.actionType,
+          target: strategyResult.target,
+          coordinates: refinedCoordinates, // Use refined coordinates!
+        };
+
+        // If vision recommends keyboard, check if it specifies a valid key
+        if (strategyResult.actionType === "keyboard") {
+          // Check if the action field contains a valid key name
+          const keyMatch = strategyResult.action.match(/\b(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Space|Enter|Escape|[wasd])\b/i);
+
+          if (keyMatch) {
+            // Vision specified the key directly in nextAction field
+            const key = keyMatch[1];
+            log.info(
+              { testId: this.testId, visionKey: key, visionAction: strategyResult.action },
+              "Vision specified keyboard key directly"
+            );
+            actionToExecute = {
+              type: "keyboard",
+              value: key,
+            };
+          } else if (strategyResult.target) {
+            // Check if the target field contains a valid key name
+            const targetKeyMatch = strategyResult.target.match(/\b(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Space|Enter|Escape|[wasd])\b/i);
+
+            if (targetKeyMatch) {
+              // Key is in target field (legacy format)
+              const key = targetKeyMatch[1];
+              log.info(
+                { testId: this.testId, visionKey: key, visionTarget: strategyResult.target },
+                "Vision specified keyboard key in target field"
+              );
+              actionToExecute = {
+                type: "keyboard",
+                value: key,
+              };
+            } else {
+              // No specific key found, try to map from description
+              log.info(
+                { testId: this.testId, visionAction: strategyResult.action, visionTarget: strategyResult.target },
+                "Vision recommended keyboard without specific key, attempting to map"
+              );
+
+              // Use GameplayController's mapping logic
+              const gameplayController = new GameplayController(
+                page,
+                browserAgent.getEvidenceStore(),
+                {
+                  maxActions: 1,
+                  maxDuration: 1000,
+                  actionInterval: 0,
+                  inputHint: this.config.inputHint,
+                }
+              );
+
+              const mappedAction = gameplayController.mapVisionToKeyboard(
+                {
+                  nextAction: strategyResult.action,
+                  targetDescription: strategyResult.target,
+                  reasoning: strategyResult.reasoning,
+                },
+                GameState.PLAYING
+              );
+
+              if (mappedAction) {
+                // Type narrowing for KeyboardAction discriminated union
+                let keyInfo: string;
+                let keyValue: string | undefined;
+
+                if (mappedAction.type === "press" || mappedAction.type === "hold") {
+                  // Both press and hold have 'key' property
+                  keyInfo = mappedAction.key;
+                  keyValue = mappedAction.key;
+                } else if (mappedAction.type === "sequence") {
+                  // Sequence has array of keys
+                  const firstKey = mappedAction.sequence[0]?.key;
+                  keyInfo = firstKey ? `sequence: ${firstKey}...` : 'sequence';
+                  keyValue = firstKey;
+                } else {
+                  // Exhaustive check - should never reach here
+                  keyInfo = 'unknown';
+                  keyValue = undefined;
+                }
+
+                log.info(
+                  { testId: this.testId, mappedKey: keyInfo, actionType: mappedAction.type },
+                  "Successfully mapped vision to specific keyboard action"
+                );
+                actionToExecute = {
+                  type: "keyboard",
+                  value: keyValue,
+                };
+              } else {
+                log.warn(
+                  { testId: this.testId, visionAction: strategyResult.action, visionTarget: strategyResult.target },
+                  "Could not map vision to keyboard - skipping action"
+                );
+                continue;
+              }
+            }
+          } else {
+            log.warn(
+              { testId: this.testId, visionAction: strategyResult.action },
+              "Vision recommended keyboard but provided no target - skipping action"
+            );
+            continue;
+          }
+        }
+
+        const executionResult = await browserAgent.executeAction(actionToExecute);
+
+        // Build detailed action description
+        let actionDetails = `Layer ${strategyResult.layer}, confidence: ${strategyResult.confidence}%`;
+        if (strategyResult.actionType === "keyboard" && actionToExecute.value) {
+          actionDetails += `, key: ${actionToExecute.value}`;
+        } else if (strategyResult.actionType === "click" && actionToExecute.coordinates) {
+          actionDetails += `, coords: (${actionToExecute.coordinates.x}, ${actionToExecute.coordinates.y})`;
+        }
+
+        // Record the action with timing metrics
+        actions.push({
+          type: strategyResult.actionType,
+          timestamp: new Date().toISOString(),
+          success: executionResult.success,
+          details: actionDetails,
+          durationMs: executionResult.durationMs,
+          startTime: executionResult.startTime,
+          endTime: executionResult.endTime,
+        });
+
+        log.debug(
+          {
+            testId: this.testId,
+            actionNumber: i + 1,
+            success: executionResult.success,
+          },
+          "Action executed",
+        );
+
+        // Auto-learn templates from confident vision-guided clicks
+        // Extract templates even if click fails - template matching is more precise and will work next time
+        if (
+          strategyResult.layer === 2 &&
+          strategyResult.actionType === "click" &&
+          strategyResult.clickCoordinates &&
+          strategyResult.confidence >= 80 &&
+          !strategyResult.reasoning?.includes("Template matching") // Don't re-extract templates
+        ) {
+          try {
+            const templateMatcher = browserAgent.getTemplateMatcher();
+
+            // Normalize template name from vision action description
+            // e.g., "Click the Start button" -> "start-button"
+            const templateName = strategyResult.action
+              .toLowerCase()
+              .replace(/^click\s+(the\s+)?/, '') // Remove "click" and "the"
+              .replace(/\s+button$/, '') // Remove "button" suffix
+              .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric with dashes
+              .replace(/^-+|-+$/g, ''); // Trim dashes
+
+            // Check if we already have this template
+            if (!templateMatcher.hasTemplate(templateName)) {
+              // Capture screenshot before action for template extraction
+              const beforeScreenshot = executionResult.beforeScreenshot
+                ? await browserAgent.getEvidenceStore().readScreenshot(executionResult.beforeScreenshot)
+                : await page.screenshot();
+
+              // Use refined coordinates (DOM-based if available) for precise template extraction
+              const coordsToUse = refinedCoordinates || strategyResult.clickCoordinates;
+
+              // Estimate button region (80x30 is typical for menu buttons)
+              const buttonWidth = 80;
+              const buttonHeight = 30;
+              const x = Math.max(0, coordsToUse.x - buttonWidth / 2);
+              const y = Math.max(0, coordsToUse.y - buttonHeight / 2);
+
+              // Extract and register template
+              await templateMatcher.extractTemplate(
+                beforeScreenshot,
+                templateName,
+                Math.floor(x),
+                Math.floor(y),
+                buttonWidth,
+                buttonHeight,
+              );
+
+              const successNote = executionResult.success
+                ? "Click succeeded - template saved for future use"
+                : "Click may have failed, but template saved for next test (template matching is ±2px precise)";
+
+              const templateCoords = refinedCoordinates || strategyResult.clickCoordinates;
+
+              log.info(
+                {
+                  testId: this.testId,
+                  templateName,
+                  x: templateCoords.x,
+                  y: templateCoords.y,
+                  actionNumber: i + 1,
+                  clickSuccess: executionResult.success,
+                  usedDOMCoords: refinedCoordinates !== undefined,
+                },
+                `✨ Learned new template from ${refinedCoordinates ? 'DOM-refined' : 'vision'} coordinates - ${successNote}`,
+              );
+            }
+          } catch (error) {
+            // Template extraction is best-effort - don't fail the test if it fails
+            log.warn(
+              {
+                testId: this.testId,
+                error: error instanceof Error ? error.message : String(error),
+              },
+              "Failed to extract template - continuing test",
+            );
+          }
+        }
+
+        // Capture screenshot and DOM snapshot after action to track progress
+        const afterActionScreenshot = await page.screenshot();
+        const afterActionDOMSnapshot = await page.evaluate(() => document.body.innerText);
+        await browserAgent
+          .getEvidenceStore()
+          .captureScreenshot(afterActionScreenshot, `action-${i + 1}-after`);
+
+        // Track progress - check if screen OR DOM changed (hybrid detection)
+        const changed = progressDetector.recordScreenshot(
+          afterActionScreenshot,
+          afterActionDOMSnapshot,
+          strategyResult.actionType,
+        );
+
+        // Reset stuck counter if progress detected
+        if (changed) {
+          consecutiveStuckDetections = 0;
+        }
+
+        // Check if game appears stuck (3+ consecutive identical states - both screenshot AND DOM)
+        if (progressDetector.isStuck()) {
+          consecutiveStuckDetections++;
+
+          log.warn(
+            {
+              testId: this.testId,
+              actionNumber: i + 1,
+              consecutiveIdenticalScreenshots: progressDetector.getMetrics().consecutiveIdentical,
+              consecutiveIdenticalDOM: progressDetector.getMetrics().consecutiveDOMIdentical,
+              stuckDetections: consecutiveStuckDetections,
+              threshold: STUCK_THRESHOLD,
+            },
+            "Game appears stuck - both visual and DOM unchanged for 3+ actions",
+          );
+
+          // Trigger unstick strategies after threshold
+          if (consecutiveStuckDetections >= STUCK_THRESHOLD) {
+            log.info(
+              {
+                testId: this.testId,
+                actionNumber: i + 1,
+                stuckDetections: consecutiveStuckDetections,
+              },
+              "Stuck threshold reached - triggering unstick strategies",
+            );
+
+            try {
+              // Get DOM analysis from browser agent
+              const domAnalysis = browserAgent.getDOMAnalysis();
+
+              // Create unstick context with game type
+              const unstickContext: UnstickContext = {
+                testId: this.testId,
+                attemptNumber: consecutiveStuckDetections,
+                domAnalysis: domAnalysis || {
+                  buttons: [],
+                  links: [],
+                  inputs: [],
+                  canvases: [],
+                  headings: [],
+                  clickableText: [],
+                  viewport: { width: 1280, height: 720 },
+                  interactiveCount: 0,
+                },
+                inputHint: this.config.inputHint,
+                evidenceStore: browserAgent.getEvidenceStore(),
+                gameType,
+              };
+
+              // Execute progressive hybrid unstick strategy sequence
+              const unstickExecutor = UnstickStrategyExecutor.createProgressiveHybrid(gameType);
+              const unstickResult = await unstickExecutor.executeAll(page, unstickContext);
+
+              log.info(
+                {
+                  testId: this.testId,
+                  actionNumber: i + 1,
+                  action: unstickResult.action,
+                  changed: unstickResult.changed,
+                  success: unstickResult.success,
+                },
+                "Unstick strategies complete during gameplay loop",
+              );
+
+              // Log the action
+              actions.push({
+                type: "unstick-attempt",
+                timestamp: new Date().toISOString(),
+                success: unstickResult.success && unstickResult.changed,
+                details: unstickResult.action,
+              });
+
+              // Reset counter if unstick worked
+              if (unstickResult.changed) {
+                consecutiveStuckDetections = 0;
+                log.info(
+                  { testId: this.testId, actionNumber: i + 1 },
+                  "Unstick successful - screen changed, continuing gameplay",
+                );
+              }
+            } catch (error) {
+              log.error(
+                {
+                  testId: this.testId,
+                  actionNumber: i + 1,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+                "Failed to execute unstick during gameplay loop, continuing",
+              );
+            }
+          }
+        }
+
+        // Small delay between actions for realistic simulation
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } catch (error) {
+        // Handle different error types
+        if (error instanceof GameCrashError) {
+          log.warn(
+            {
+              testId: this.testId,
+              actionsExecuted: i + 1,
+              error: error.message,
+            },
+            "Game crashed during action execution - ending test gracefully",
+          );
+
+          actions.push({
+            type: "crash-detected",
+            timestamp: new Date().toISOString(),
+            success: false,
+            details: error.message,
+          });
+
+          // End test gracefully on crash
+          break;
+        }
+
+        // For other errors, log and continue
+        log.error(
+          {
+            testId: this.testId,
+            actionNumber: i + 1,
+            error,
+          },
+          "Error executing action - continuing test",
+        );
+
+        actions.push({
+          type: "error",
+          timestamp: new Date().toISOString(),
+          success: false,
+          details: error instanceof Error ? error.message : "Unknown error",
+        });
+
+        // Continue to next action
+      }
+    }
+
+    // Get final progress metrics
+    const progressMetrics = progressDetector.getMetrics();
+
+    log.info(
+      {
+        testId: this.testId,
+        totalActions: actions.length,
+        successCount: actions.filter((a) => a.success).length,
+        progressScore: progressMetrics.progressScore,
+        uniqueStates: progressMetrics.uniqueGameStates,
+        inputSuccessRate: `${progressMetrics.inputsSuccessful}/${progressMetrics.inputsAttempted}`,
+      },
+      "Test action execution completed - progress metrics",
+    );
+
+    return { actions, progressMetrics };
+  }
+}

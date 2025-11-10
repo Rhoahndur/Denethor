@@ -1,0 +1,103 @@
+# generated: 2025-11-03
+# project: Denethor
+# project_key: Denethor
+# tracking_system: file-system
+# story_location: {project-root}/docs/stories
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic exists in epic file but not contexted
+#   - contexted: Next epic tech context created by *epic-tech-context (required)
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - drafted: Story file created in stories folder by *create-story
+#   - ready-for-dev: Draft approved and story context created by *story-ready
+#   - in-progress: Developer actively working on implementation by *dev-story
+#   - review: Implementation complete, ready for review by *code-review
+#   - done: Story completed by *story-done
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - completed: Retrospective has been done by *retrospective
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epics should be 'contexted' before stories can be 'drafted'
+# - SM typically drafts next story ONLY after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', dev reviews, then Dev moves to 'done'
+
+generated: 2025-11-03
+project: Denethor
+project_key: Denethor
+tracking_system: file-system
+story_location: "{project-root}/docs/stories"
+
+development_status:
+  epic-1: backlog
+  1-1-initialize-project-and-install-core-dependencies: done
+  1-2-configure-biome-for-linting-and-formatting: done
+  1-3-configure-vitest-for-testing: done
+  1-4-create-custom-error-classes: done
+  1-5-create-centralized-configuration-module: done
+  1-6-set-up-pino-logger: done
+  1-7-define-shared-typescript-types: done
+  1-8-create-retry-utility-with-exponential-backoff: done
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-create-evidence-store-core-module: done
+  2-2-implement-screenshot-capture-with-auto-naming: done
+  2-3-implement-log-collection: done
+  2-4-add-evidence-retrieval-methods: done
+  epic-2-retrospective: optional
+
+  epic-3: done
+  3-1-create-browser-agent-with-browserbase-connection: done
+  3-2-integrate-stagehand-for-browser-control: done
+  3-3-implement-core-heuristic-patterns-layer-1: done
+  3-4-build-vision-analyzer-for-screenshot-analysis-layer-2: done
+  3-5-create-hybrid-action-strategy-orchestrator: done
+  3-6-implement-action-execution-with-evidence-capture: done
+  3-7-add-game-type-detection-logic: done
+  epic-3-retrospective: optional
+
+  epic-4: done
+  4-1-create-ai-evaluator-core-module: done
+  4-2-define-evaluation-prompts: done
+  4-3-implement-playability-scoring-logic: done
+  4-4-implement-issue-detection-and-categorization: done
+  epic-4-retrospective: optional
+
+  epic-5: done
+  5-1-create-report-generator-core-module: done
+  5-2-implement-json-report-generation: done
+  5-3-implement-markdown-report-generation: done
+  5-4-implement-html-report-generation: done
+  epic-5-retrospective: optional
+
+  epic-6: done
+  6-1-create-qa-orchestrator-core-module: done
+  6-2-implement-test-execution-flow: done
+  6-3-build-cli-with-commander-js: done
+  6-4-create-programmatic-api-export: done
+  6-5-create-lambda-handler-function: done
+  epic-6-retrospective: optional
+
+  epic-7: done
+  7-1-integration-tests-for-orchestrator-and-components: done
+  7-2-end-to-end-cli-tests: done
+  7-3-end-to-end-api-tests: done
+  7-4-error-scenario-tests: done
+  7-5-performance-tests: done
+  7-6-lambda-integration-tests: done
+  7-7-coverage-verification-and-test-documentation: done
+  epic-7-retrospective: optional
+
+  epic-8: done
+  8-1-create-ci-cd-pipeline-with-github-actions: done
+  8-2-create-aws-deployment-guide: done
+  8-3-create-api-documentation: done
+  8-4-create-user-guide-and-examples: done
+  epic-8-retrospective: optional

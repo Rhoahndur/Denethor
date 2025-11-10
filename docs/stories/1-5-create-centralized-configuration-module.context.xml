@@ -1,0 +1,232 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>5</storyId>
+    <title>Create Centralized Configuration Module</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-03</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/stories/1-5-create-centralized-configuration-module.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>centralized environment variable management</iWant>
+    <soThat>API keys and config are accessed safely and consistently</soThat>
+    <tasks>
+- [ ] Create src/utils directory structure (AC: #1)
+  - [ ] Create src/utils/ subdirectory
+- [ ] Implement config module with environment variable loading (AC: #1, #2, #3, #7)
+  - [ ] Create config object with browserbase, openai, and output sections
+  - [ ] Load BROWSERBASE_API_KEY from process.env
+  - [ ] Load BROWSERBASE_PROJECT_ID from process.env
+  - [ ] Load OPENAI_API_KEY from process.env
+  - [ ] Load OUTPUT_DIR from process.env with default './output'
+  - [ ] Follow architecture pattern (Pattern 4: Environment Variable Access)
+- [ ] Implement config validation (AC: #4, #7)
+  - [ ] Create validateConfig() function
+  - [ ] Check browserbase.apiKey is defined and non-empty
+  - [ ] Check browserbase.projectId is defined and non-empty
+  - [ ] Check openai.apiKey is defined and non-empty
+  - [ ] Throw ValidationError if any required key is missing
+  - [ ] Call validateConfig() at module load time
+- [ ] Create .env.example file (AC: #5)
+  - [ ] Add BROWSERBASE_API_KEY with placeholder
+  - [ ] Add BROWSERBASE_PROJECT_ID with placeholder
+  - [ ] Add OPENAI_API_KEY with placeholder
+  - [ ] Add OUTPUT_DIR with example value
+  - [ ] Include comments explaining each variable
+- [ ] Update .gitignore (AC: #6)
+  - [ ] Add .env to .gitignore if not already present
+  - [ ] Verify .env.example is NOT ignored
+- [ ] Create comprehensive unit tests (AC: #8)
+  - [ ] Test config object structure (browserbase, openai, output sections)
+  - [ ] Test validation with all required variables present
+  - [ ] Test validation throws ValidationError when BROWSERBASE_API_KEY missing
+  - [ ] Test validation throws ValidationError when BROWSERBASE_PROJECT_ID missing
+  - [ ] Test validation throws ValidationError when OPENAI_API_KEY missing
+  - [ ] Test OUTPUT_DIR defaults to './output' when not set
+  - [ ] Test OUTPUT_DIR uses custom value when set
+  - [ ] Mock process.env for test isolation
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. Create `src/utils/config.ts` with config object
+2. Load BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID, OPENAI_API_KEY from env
+3. Provide default for OUTPUT_DIR (./output)
+4. Validate required keys at module load (throw ValidationError if missing)
+5. Create `.env.example` with placeholder values
+6. Add `.env` to .gitignore
+7. Config module follows architecture pattern
+8. Unit tests verify validation logic
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture - Pattern 4: Environment Variable Access</title>
+        <section>Pattern 4: Environment Variable Access (lines 457-490)</section>
+        <snippet>Centralized config module pattern with nested config object (browserbase, openai, output sections). Export const config with process.env access. validateConfig() function called at module load. Rules: ALL env vars through config, validated at startup (fail fast), never use process.env directly in components.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture - NFR-5 Security</title>
+        <section>Security Requirements for Config Management</section>
+        <snippet>Centralized env validation, no key logging. Config management must prevent accidental secret exposure and provide single point of audit for environment access.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics.md</path>
+        <title>Epic 1 - Story 1.5</title>
+        <section>Story 1.5: Create Centralized Configuration Module (lines 380-398)</section>
+        <snippet>Story defines config module creation with BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID, OPENAI_API_KEY loading, OUTPUT_DIR default, validation with ValidationError, .env.example creation, and .gitignore update. Prerequisites: Story 1.4 (error classes available).</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>src/errors/validationError.ts</path>
+        <kind>error-class</kind>
+        <symbol>ValidationError</symbol>
+        <lines>1-13</lines>
+        <reason>Required for throwing errors when required environment variables are missing. Import with: import { ValidationError } from '../errors/validationError'</reason>
+      </artifact>
+      <artifact>
+        <path>src/errors/qaError.ts</path>
+        <kind>error-class</kind>
+        <symbol>QAError</symbol>
+        <lines>1-11</lines>
+        <reason>Base error class that ValidationError extends. Understanding the inheritance chain helps with proper error handling.</reason>
+      </artifact>
+      <artifact>
+        <path>src/errors/errors.test.ts</path>
+        <kind>test</kind>
+        <symbol>ValidationError tests</symbol>
+        <lines>125-163</lines>
+        <reason>Reference for test patterns - comprehensive testing with describe blocks, message/cause parameter handling, instanceof checks. Apply similar thoroughness to config tests.</reason>
+      </artifact>
+      <artifact>
+        <path>vitest.config.ts</path>
+        <kind>config</kind>
+        <symbol>Vitest configuration</symbol>
+        <lines>1-12</lines>
+        <reason>Test framework configuration - globals: true, environment: 'node', coverage with v8 provider. Tests will run in this environment.</reason>
+      </artifact>
+      <artifact>
+        <path>.gitignore</path>
+        <kind>config</kind>
+        <symbol>Git ignore rules</symbol>
+        <lines>18-23</lines>
+        <reason>.env is already present in .gitignore (line 19), so AC #6 is already satisfied. Verify .env.example is NOT in .gitignore.</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <node>
+        <runtime>bun (latest)</runtime>
+        <testing>vitest@4.0, @vitest/coverage-v8@^4.0.6</testing>
+        <quality>@biomejs/biome@2.3.2</quality>
+        <production>
+          @browserbasehq/sdk@2.6.0 (will use config.browserbase.apiKey),
+          @browserbasehq/stagehand@2.5.0 (will use config.browserbase),
+          ai@5.0.86 (will use config.openai.apiKey),
+          @ai-sdk/openai@2.0.59 (will use config.openai),
+          commander@14.0.2 (CLI will use config.output.dir),
+          pino@10.1.0 (logger will use config in Story 1.6)
+        </production>
+      </node>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Follow architecture.md Pattern 4 exactly (lines 457-490) - config object with browserbase, openai, output sections</constraint>
+    <constraint>Use ValidationError from src/errors/validationError.ts for missing required environment variables</constraint>
+    <constraint>Validate at module load time - fail fast if required keys missing</constraint>
+    <constraint>Never access process.env directly - all access through centralized config module</constraint>
+    <constraint>TypeScript strict mode compatible - proper typing for all config properties</constraint>
+    <constraint>Security (NFR-5): API keys never logged or exposed in error messages</constraint>
+    <constraint>Test file co-located: src/utils/config.test.ts alongside src/utils/config.ts</constraint>
+    <constraint>Mock process.env in tests for deterministic, isolated test execution</constraint>
+    <constraint>Use non-assertion operator (!) for required env vars: process.env.BROWSERBASE_API_KEY!</constraint>
+    <constraint>Use default value syntax for optional env vars: process.env.OUTPUT_DIR || './output'</constraint>
+    <constraint>.env file already in .gitignore (line 19) - verify .env.example is NOT ignored</constraint>
+    <constraint>Export as const: export const config = {...}</constraint>
+    <constraint>Call validateConfig(config) at module load (top-level execution)</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>config</name>
+      <kind>exported constant object</kind>
+      <signature>
+export const config = {
+  browserbase: {
+    apiKey: process.env.BROWSERBASE_API_KEY!,
+    projectId: process.env.BROWSERBASE_PROJECT_ID!
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY!
+  },
+  output: {
+    dir: process.env.OUTPUT_DIR || './output'
+  }
+}
+      </signature>
+      <path>src/utils/config.ts</path>
+    </interface>
+    <interface>
+      <name>validateConfig</name>
+      <kind>validation function</kind>
+      <signature>
+function validateConfig(config: typeof config): void {
+  // Check browserbase.apiKey is defined and non-empty
+  // Check browserbase.projectId is defined and non-empty
+  // Check openai.apiKey is defined and non-empty
+  // Throw ValidationError if any required key is missing
+}
+
+validateConfig(config) // Call at module load
+      </signature>
+      <path>src/utils/config.ts</path>
+    </interface>
+    <interface>
+      <name>config usage pattern</name>
+      <kind>import pattern for components</kind>
+      <signature>
+// In any component that needs config
+import { config } from '@/utils/config'
+
+// Access config values
+const client = new Browserbase(config.browserbase.apiKey)
+const outputPath = config.output.dir
+      </signature>
+      <path>Future components (Story 1.6+)</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+Tests use Vitest 4.0 with globals enabled, node environment, and v8 coverage provider. Test files co-located with implementation (*.test.ts pattern). Tests use describe blocks for organization, comprehensive coverage of happy paths and error cases, mocking for external dependencies. Follow patterns from src/errors/errors.test.ts: test instantiation, message handling, error throwing, edge cases. Mock process.env using vi.stubEnv() or similar for deterministic tests.
+    </standards>
+    <locations>
+src/utils/config.test.ts (co-located with src/utils/config.ts)
+    </locations>
+    <ideas>
+      <idea ac="1,7">Test config object structure has correct sections (browserbase, openai, output)</idea>
+      <idea ac="2">Test config loads BROWSERBASE_API_KEY from process.env correctly</idea>
+      <idea ac="2">Test config loads BROWSERBASE_PROJECT_ID from process.env correctly</idea>
+      <idea ac="2">Test config loads OPENAI_API_KEY from process.env correctly</idea>
+      <idea ac="3">Test OUTPUT_DIR defaults to './output' when process.env.OUTPUT_DIR is undefined</idea>
+      <idea ac="3">Test OUTPUT_DIR uses custom value when process.env.OUTPUT_DIR is set</idea>
+      <idea ac="4">Test validateConfig throws ValidationError when BROWSERBASE_API_KEY is missing</idea>
+      <idea ac="4">Test validateConfig throws ValidationError when BROWSERBASE_API_KEY is empty string</idea>
+      <idea ac="4">Test validateConfig throws ValidationError when BROWSERBASE_PROJECT_ID is missing</idea>
+      <idea ac="4">Test validateConfig throws ValidationError when BROWSERBASE_PROJECT_ID is empty string</idea>
+      <idea ac="4">Test validateConfig throws ValidationError when OPENAI_API_KEY is missing</idea>
+      <idea ac="4">Test validateConfig throws ValidationError when OPENAI_API_KEY is empty string</idea>
+      <idea ac="4">Test validateConfig passes (no throw) when all required variables are present and non-empty</idea>
+      <idea ac="4">Test ValidationError message clearly indicates which specific env var is missing</idea>
+      <idea ac="8">Test with mocked process.env to ensure test isolation and determinism</idea>
+      <idea ac="8">Test config module can be imported without errors when env vars are present</idea>
+    </ideas>
+  </tests>
+</story-context>

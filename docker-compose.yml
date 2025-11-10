@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # Main QA Agent service
+  denethor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: denethor-qa:latest
+    container_name: denethor-qa
+
+    # Environment variables from .env file
+    env_file:
+      - .env
+
+    # Additional environment variables
+    environment:
+      - NODE_ENV=production
+      - OUTPUT_DIR=/app/output
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+
+    # Mount output directory for accessing reports
+    volumes:
+      - ./output:/app/output
+      - ./quick-test-output:/app/quick-test-output
+
+    # Override default command - run CLI in interactive mode
+    # Usage: docker-compose run denethor test <game-url>
+    stdin_open: true
+    tty: true
+
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+    # Network mode
+    network_mode: bridge
+
+  # Optional: Demo test runner
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: denethor-qa:latest
+    container_name: denethor-demo
+    env_file:
+      - .env
+    volumes:
+      - ./demo-output:/app/demo-output
+    command: ["bun", "demo-test.ts"]
+    profiles:
+      - demo
+
+  # Optional: Quick test runner
+  quick-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: denethor-qa:latest
+    container_name: denethor-quick-test
+    env_file:
+      - .env
+    volumes:
+      - ./quick-test-output:/app/quick-test-output
+    environment:
+      - GAME_URL=${GAME_URL:-https://meiri.itch.io/doce-fim}
+    command: ["npx", "tsx", "-r", "dotenv/config", "quick-test.ts", "${GAME_URL:-https://meiri.itch.io/doce-fim}"]
+    profiles:
+      - quick
+
+# Volumes for persistent data
+volumes:
+  output:
+    driver: local

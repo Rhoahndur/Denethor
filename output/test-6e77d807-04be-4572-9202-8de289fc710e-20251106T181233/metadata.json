@@ -1,0 +1,17 @@
+{
+  "testId": "6e77d807-04be-4572-9202-8de289fc710e",
+  "gameUrl": "",
+  "timestamp": "2025-11-06T18:12:33.837Z",
+  "duration": 0,
+  "agentVersion": "1.0.0",
+  "browserSettings": {
+    "browser": "chrome",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "arguments": [],
+    "device": "desktop",
+    "locale": "en-US"
+  }
+}

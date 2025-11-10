@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+.github
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Dependencies (will be installed in container)
+node_modules
+bun.lockb
+
+# Build artifacts
+dist
+build
+*.tsbuildinfo
+
+# Test files
+*.test.ts
+*.test.js
+coverage
+.nyc_output
+
+# Output directories
+output
+demo-output
+quick-test-output
+throttled-output
+real-test
+full-test-*
+
+# Documentation
+*.md
+!README.md
+docs
+examples
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# Lambda deployment
+lambda-deployment.zip
+terraform
