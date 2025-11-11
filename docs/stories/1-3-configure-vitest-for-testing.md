@@ -129,9 +129,6 @@ so that I can write and execute tests for all components.
 
 - docs/stories/1-3-configure-vitest-for-testing.context.xml
 
-### Agent Model Used
-
-Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
 
 ### Debug Log References
 

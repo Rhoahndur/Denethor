@@ -195,9 +195,6 @@ From architecture.md and PRD:
 
 No context file was generated for this story (proceeded with story file only).
 
-### Agent Model Used
-
-Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
 
 ### Debug Log References
 
@@ -248,7 +245,6 @@ None - implementation completed without requiring debug logs.
 
 **Reviewer:** Sasha (AI Code Reviewer)
 **Date:** 2025-11-04
-**Review Model:** Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
 
 ### Outcome
 

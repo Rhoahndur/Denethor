@@ -92,9 +92,6 @@ so that I can begin implementing features with the correct tooling.
 
 - docs/stories/1-1-initialize-project-and-install-core-dependencies.context.xml
 
-### Agent Model Used
-
-claude-sonnet-4-5-20250929
 
 ### Debug Log References
 

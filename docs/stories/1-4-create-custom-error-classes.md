@@ -139,9 +139,6 @@ so that error handling logic can distinguish between retry-able and fatal errors
 
 - docs/stories/1-4-create-custom-error-classes.context.xml
 
-### Agent Model Used
-
-Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
 
 ### Debug Log References
 

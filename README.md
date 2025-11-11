@@ -114,7 +114,7 @@ The `quick-test` script runs a minimal 30-second verification test:
 - [Usage](#usage)
   - [CLI](#cli-command-line)
   - [Programmatic API](#programmatic-api)
-  - [AWS Lambda](#aws-lambda)
+  - [Deployment Options](#deployment-options)
 - [Playability Scores](#playability-scores)
 - [Configuration](#configuration)
 - [Example Output](#example-output)
@@ -270,55 +270,51 @@ for (const issue of results.report.issues) {
 
 See [API Documentation](docs/api/README.md) and [Examples](examples/) for more.
 
-### AWS Lambda
+### Deployment Options
 
-Perfect for serverless, on-demand testing at scale.
+> **📦 Ready to deploy?** See [**DEPLOYMENT.md**](DEPLOYMENT.md) for comprehensive deployment strategies!
 
+Denethor can be deployed in multiple ways depending on your needs:
+
+| Deployment Method | Best For | Cost | Setup Time |
+|-------------------|----------|------|------------|
+| **Local CLI** | Individual developers | $0 | 5 min |
+| **GitHub Actions** | Team CI/CD | Free tier | 30 min |
+| **AWS Lambda** | Production service | ~$1-5/mo | 2 hours |
+| **Docker + ECS** | Scheduled/batch | ~$10-30/mo | 3 hours |
+| **Docker Compose** | On-premise | $0 | 10 min |
+
+#### Quick Examples:
+
+**GitHub Actions** (Automated testing on every commit):
+```yaml
+# .github/workflows/qa-test.yml
+- name: Run QA Test
+  env:
+    BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  run: bun run cli test https://example.com/game
+```
+
+**AWS Lambda** (Serverless, on-demand):
 ```bash
-# Deploy to Lambda
-aws lambda create-function \
-  --function-name browsergame-qa \
-  --runtime nodejs20.x \
-  --handler src/lambda/handler.handler \
-  --zip-file fileb://lambda-deployment.zip \
-  --timeout 300 \
-  --memory-size 2048
-
-# Invoke
 aws lambda invoke \
-  --function-name browsergame-qa \
-  --payload '{"body":"{\"gameUrl\":\"https://example.com/game\",\"inputHint\":\"Arrow keys for movement, spacebar to jump\"}"}' \
+  --function-name denethor-game-qa \
+  --payload '{"gameUrl":"https://example.com/game"}' \
   response.json
 ```
 
-See [AWS Lambda Deployment Guide](docs/deployment/aws-lambda.md) for complete instructions.
-
-### Docker
-
-Perfect for consistent local development and cross-platform deployments.
-
+**Docker** (Consistent environment):
 ```bash
-# Build once
-docker-compose build
-
-# Run quick test
 docker-compose run --rm denethor \
-  npx tsx -r dotenv/config quick-test.ts https://example.com/game
-
-# Run full test
-docker-compose run --rm denethor \
-  npx tsx -r dotenv/config src/cli/index.ts test https://example.com/game
+  bun run cli test https://example.com/game
 ```
 
-Your `.env` file is automatically loaded, and output files are saved to `./qa-tests/` on your host machine.
-
-**Benefits:**
-- No need to install Node.js/Bun on host machine
-- Identical environment across all computers
-- Resource limits prevent runaway processes
-- Perfect for CI/CD pipelines
-
-See [Docker Setup Guide](DOCKER.md) for complete instructions, production deployment, and troubleshooting.
+**See [DEPLOYMENT.md](DEPLOYMENT.md) for:**
+- Detailed setup instructions for each method
+- Cost comparisons and scaling strategies
+- Production deployment best practices
+- Monitoring and troubleshooting guides
 
 ---
 

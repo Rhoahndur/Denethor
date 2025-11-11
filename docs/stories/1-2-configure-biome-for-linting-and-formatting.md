@@ -104,9 +104,6 @@ so that all code follows consistent standards automatically.
 
 - docs/stories/1-2-configure-biome-for-linting-and-formatting.context.xml
 
-### Agent Model Used
-
-Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
 
 ### Debug Log References
 
