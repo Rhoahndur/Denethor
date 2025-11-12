@@ -15,6 +15,7 @@ quick-test-output
 
 # deployment artifacts
 lambda-deployment.zip
+lambda-env.json 
 
 # code coverage
 coverage

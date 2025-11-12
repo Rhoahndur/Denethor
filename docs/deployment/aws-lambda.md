@@ -55,9 +55,194 @@ LOG_LEVEL=info  # Optional: debug, info, warn, error
 
 ## Deployment Methods
 
-### Method 1: AWS Console (Recommended for First-Time)
+### Method 1: Docker + ECR (Recommended)
 
-This method is best for learning and testing.
+**Why Docker?**
+- Handles TypeScript bundling automatically with esbuild
+- No ZIP size limits (supports up to 10GB vs 250MB for ZIP)
+- Consistent builds across environments
+- Easier dependency management
+- Better suited for production
+
+This is the recommended approach for all deployments.
+
+#### Prerequisites
+
+- **Docker** installed - [Install Docker](https://docs.docker.com/get-docker/)
+- **AWS CLI** configured
+- **Your API Keys** (Browserbase + OpenAI)
+
+#### Step 1: Configure API Keys Locally
+
+First, set up your environment variables that will be used for Lambda:
+
+```bash
+# Create lambda-env.json with YOUR API keys
+cat > lambda-env.json << 'EOF'
+{
+  "Variables": {
+    "BROWSERBASE_API_KEY": "your_browserbase_api_key_here",
+    "BROWSERBASE_PROJECT_ID": "your_browserbase_project_id_here",
+    "OPENAI_API_KEY": "your_openai_api_key_here"
+  }
+}
+EOF
+```
+
+**Important:** Replace the placeholder values with your actual API keys from:
+- **Browserbase**: Sign up at [https://www.browserbase.com/](https://www.browserbase.com/) and get your API key + Project ID
+- **OpenAI**: Get your API key from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+
+**Security Note:** The `lambda-env.json` file is in `.gitignore` and will NOT be committed to your repository. Each developer needs their own API keys.
+
+#### Step 2: Create IAM Role
+
+```bash
+# Create IAM role for Lambda execution
+aws iam create-role \
+  --role-name DenethorLambdaRole \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": {"Service": "lambda.amazonaws.com"},
+      "Action": "sts:AssumeRole"
+    }]
+  }'
+
+# Attach basic execution policy (for CloudWatch Logs)
+aws iam attach-role-policy \
+  --role-name DenethorLambdaRole \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+```
+
+#### Step 3: Create ECR Repository
+
+```bash
+# Create ECR repository to store Docker images
+aws ecr create-repository \
+  --repository-name denethor-lambda \
+  --region us-east-1
+```
+
+#### Step 4: Build Docker Image
+
+The included `Dockerfile.lambda` handles everything automatically:
+- Installs dependencies (including dotenv required by Stagehand)
+- Bundles TypeScript into JavaScript using esbuild
+- Sets up the correct Lambda runtime
+
+```bash
+# Build for Lambda (linux/amd64 architecture)
+docker build \
+  --platform linux/amd64 \
+  --provenance=false \
+  --sbom=false \
+  -f Dockerfile.lambda \
+  -t denethor-lambda:latest \
+  .
+```
+
+**Note:** The `--provenance=false --sbom=false` flags are required because Lambda doesn't support multi-platform manifests.
+
+#### Step 5: Push Image to ECR
+
+```bash
+# Get your AWS account ID
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Authenticate Docker with ECR
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin \
+  ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
+
+# Tag image for ECR
+docker tag denethor-lambda:latest \
+  ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/denethor-lambda:latest
+
+# Push to ECR
+docker push ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/denethor-lambda:latest
+```
+
+#### Step 6: Create Lambda Function
+
+```bash
+# Get your AWS account ID and IAM role ARN
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/DenethorLambdaRole"
+IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/denethor-lambda:latest"
+
+# Create Lambda function
+aws lambda create-function \
+  --function-name denethor-game-qa \
+  --package-type Image \
+  --code ImageUri=${IMAGE_URI} \
+  --role ${ROLE_ARN} \
+  --timeout 300 \
+  --memory-size 2048 \
+  --environment file://lambda-env.json
+```
+
+#### Step 7: Test Your Deployment
+
+```bash
+# Create test event
+cat > test-event.json << 'EOF'
+{
+  "body": "{\"gameUrl\":\"https://meiri.itch.io/doce-fim\",\"maxActions\":5}"
+}
+EOF
+
+# Invoke Lambda function
+aws lambda invoke \
+  --function-name denethor-game-qa \
+  --cli-binary-format raw-in-base64-out \
+  --payload file://test-event.json \
+  response.json
+
+# View results
+cat response.json | jq '.'
+```
+
+#### Updating Your Deployment
+
+When you make code changes:
+
+```bash
+# Rebuild Docker image
+docker build --platform linux/amd64 --provenance=false --sbom=false \
+  -f Dockerfile.lambda -t denethor-lambda:latest .
+
+# Tag with new version (optional but recommended)
+docker tag denethor-lambda:latest \
+  ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/denethor-lambda:v2
+
+# Push to ECR
+docker push ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/denethor-lambda:v2
+
+# Update Lambda function
+aws lambda update-function-code \
+  --function-name denethor-game-qa \
+  --image-uri ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/denethor-lambda:v2
+```
+
+#### Updating Environment Variables
+
+If you need to update API keys:
+
+```bash
+# Update lambda-env.json with new keys
+# Then update Lambda configuration
+aws lambda update-function-configuration \
+  --function-name denethor-game-qa \
+  --environment file://lambda-env.json
+```
+
+---
+
+### Method 2: AWS Console with ZIP (Alternative)
+
+This method works for smaller projects but has limitations (250MB unzipped limit).
 
 #### Step 1: Build the Lambda Package
 

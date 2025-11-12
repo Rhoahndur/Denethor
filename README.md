@@ -276,13 +276,13 @@ See [API Documentation](docs/api/README.md) and [Examples](examples/) for more.
 
 Denethor can be deployed in multiple ways depending on your needs:
 
-| Deployment Method | Best For | Cost | Setup Time |
-|-------------------|----------|------|------------|
-| **Local CLI** | Individual developers | $0 | 5 min |
-| **GitHub Actions** | Team CI/CD | Free tier | 30 min |
-| **AWS Lambda** | Production service | ~$1-5/mo | 2 hours |
-| **Docker + ECS** | Scheduled/batch | ~$10-30/mo | 3 hours |
-| **Docker Compose** | On-premise | $0 | 10 min |
+| Deployment Method | Best For | Cost | Setup Time | Requirements |
+|-------------------|----------|------|------------|--------------|
+| **Local CLI** | Individual developers | $0 | 5 min | Bun + API keys |
+| **GitHub Actions** | Team CI/CD | Free tier | 30 min | GitHub repo + API keys |
+| **AWS Lambda** | Production service | ~$1-5/mo | 1 hour | AWS account + Docker + API keys |
+| **Docker + ECS** | Scheduled/batch | ~$10-30/mo | 3 hours | AWS account + Docker |
+| **Docker Compose** | On-premise | $0 | 10 min | Docker + API keys |
 
 #### Quick Examples:
 
@@ -297,10 +297,29 @@ Denethor can be deployed in multiple ways depending on your needs:
 ```
 
 **AWS Lambda** (Serverless, on-demand):
+
+First-time setup (requires your own API keys):
+```bash
+# 1. Create lambda-env.json with YOUR API keys
+cat > lambda-env.json << 'EOF'
+{
+  "Variables": {
+    "BROWSERBASE_API_KEY": "your_browserbase_api_key",
+    "BROWSERBASE_PROJECT_ID": "your_project_id",
+    "OPENAI_API_KEY": "your_openai_key"
+  }
+}
+EOF
+
+# 2. Deploy using Docker + ECR (full guide in docs)
+# See docs/deployment/aws-lambda.md for complete instructions
+```
+
+Invoke after deployment:
 ```bash
 aws lambda invoke \
   --function-name denethor-game-qa \
-  --payload '{"gameUrl":"https://example.com/game"}' \
+  --payload '{"body":"{\"gameUrl\":\"https://example.com/game\",\"maxActions\":10}"}' \
   response.json
 ```
 

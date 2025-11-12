@@ -1,0 +1,43 @@
+# Denethor Lambda Deployment
+# Using AWS Lambda Node.js 20 base image
+
+FROM public.ecr.aws/lambda/nodejs:20
+
+# Copy package files
+COPY package.json ${LAMBDA_TASK_ROOT}/
+COPY tsconfig.json ${LAMBDA_TASK_ROOT}/
+
+# Install ALL dependencies (including dev dependencies for build)
+WORKDIR ${LAMBDA_TASK_ROOT}
+RUN npm install --legacy-peer-deps
+
+# Install dotenv explicitly (required by stagehand)
+RUN npm install dotenv --legacy-peer-deps
+
+# Copy application code
+COPY src/ ${LAMBDA_TASK_ROOT}/src/
+
+# Install esbuild for bundling TypeScript
+RUN npm install -g esbuild
+
+# Bundle the Lambda handler with esbuild
+# This creates a single JavaScript file with all dependencies
+RUN esbuild src/lambda/handler.ts \
+  --bundle \
+  --platform=node \
+  --target=node20 \
+  --format=esm \
+  --outfile=handler.mjs \
+  --external:@browserbasehq/sdk \
+  --external:@browserbasehq/stagehand \
+  --external:@ai-sdk/openai \
+  --external:ai \
+  --external:sharp \
+  --external:pixelmatch \
+  --external:pino
+
+# Clean up to reduce image size
+RUN rm -rf src/ node_modules/.cache
+
+# Set the handler to the bundled file
+CMD [ "handler.handler" ]
