@@ -34,7 +34,8 @@ RUN esbuild src/lambda/handler.ts \
   --external:ai \
   --external:sharp \
   --external:pixelmatch \
-  --external:pino
+  --external:pino \
+  --external:@aws-sdk/client-s3
 
 # Clean up to reduce image size
 RUN rm -rf src/ node_modules/.cache

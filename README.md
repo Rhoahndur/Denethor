@@ -296,7 +296,9 @@ Denethor can be deployed in multiple ways depending on your needs:
   run: bun run cli test https://example.com/game
 ```
 
-**AWS Lambda** (Serverless, on-demand):
+**AWS Lambda** (Serverless, on-demand with S3 storage):
+
+Lambda deployments include **S3 report storage** for persistent access to test results. Reports are automatically uploaded to S3 with presigned URLs in the response.
 
 First-time setup (requires your own API keys):
 ```bash
@@ -306,7 +308,8 @@ cat > lambda-env.json << 'EOF'
   "Variables": {
     "BROWSERBASE_API_KEY": "your_browserbase_api_key",
     "BROWSERBASE_PROJECT_ID": "your_project_id",
-    "OPENAI_API_KEY": "your_openai_key"
+    "OPENAI_API_KEY": "your_openai_key",
+    "REPORTS_BUCKET_NAME": "your-s3-bucket-name"
   }
 }
 EOF
@@ -321,6 +324,10 @@ aws lambda invoke \
   --function-name denethor-game-qa \
   --payload '{"body":"{\"gameUrl\":\"https://example.com/game\",\"maxActions\":10}"}' \
   response.json
+
+# Response includes both local paths and S3 URLs:
+# - reportPaths: { json, markdown, html } (ephemeral /tmp files)
+# - s3Reports: { json, markdown, html } (persistent S3 URLs)
 ```
 
 **Docker** (Consistent environment):

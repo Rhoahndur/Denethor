@@ -34,6 +34,7 @@ import { runQATest } from "@/api/index";
 import { GameCrashError } from "@/errors/gameCrashError";
 import { ValidationError } from "@/errors/validationError";
 import { logger } from "@/utils/logger";
+import { S3Uploader } from "@/utils/s3-uploader";
 
 const log = logger.child({ component: "LambdaHandler" });
 
@@ -83,8 +84,14 @@ interface LambdaResponseBody {
     category: string;
     description: string;
   }>;
-  /** Report file paths */
+  /** Report file paths (local paths in /tmp) */
   reportPaths: {
+    json: string;
+    markdown: string;
+    html: string;
+  };
+  /** S3 report URLs (publicly accessible) */
+  s3Reports: {
     json: string;
     markdown: string;
     html: string;
@@ -234,6 +241,34 @@ export async function handler(
       "QA test completed successfully",
     );
 
+    // Upload reports to S3
+    log.info(
+      {
+        requestId: context.awsRequestId,
+        testId: result.report.meta.testId,
+      },
+      "Uploading reports to S3",
+    );
+
+    const s3Uploader = new S3Uploader();
+    const s3Results = await s3Uploader.uploadReports(
+      result.report.meta.testId,
+      result.reportPaths,
+    );
+
+    log.info(
+      {
+        requestId: context.awsRequestId,
+        testId: result.report.meta.testId,
+        s3Urls: {
+          json: s3Results.json.url,
+          markdown: s3Results.markdown.url,
+          html: s3Results.html.url,
+        },
+      },
+      "Reports uploaded to S3 successfully",
+    );
+
     // Build response body
     const responseBody: LambdaResponseBody = {
       testId: result.report.meta.testId,
@@ -244,6 +279,11 @@ export async function handler(
       confidence: result.report.evaluation.confidence,
       issues: result.report.issues,
       reportPaths: result.reportPaths,
+      s3Reports: {
+        json: s3Results.json.url,
+        markdown: s3Results.markdown.url,
+        html: s3Results.html.url,
+      },
       duration: result.report.meta.duration,
     };
 

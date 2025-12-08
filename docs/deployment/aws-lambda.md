@@ -6,10 +6,12 @@ This guide walks you through deploying Denethor as an AWS Lambda function for se
 
 - [Prerequisites](#prerequisites)
 - [Configuration Overview](#configuration-overview)
+- [S3 Report Storage Setup](#s3-report-storage-setup)
 - [Deployment Methods](#deployment-methods)
-  - [Method 1: AWS Console (Recommended for First-Time)](#method-1-aws-console-recommended-for-first-time)
-  - [Method 2: AWS CLI](#method-2-aws-cli)
-  - [Method 3: Infrastructure as Code (Terraform)](#method-3-infrastructure-as-code-terraform)
+  - [Method 1: Docker + ECR (Recommended)](#method-1-docker--ecr-recommended)
+  - [Method 2: AWS Console with ZIP (Alternative)](#method-2-aws-console-with-zip-alternative)
+  - [Method 3: AWS CLI](#method-3-aws-cli)
+  - [Method 4: Infrastructure as Code (Terraform)](#method-4-infrastructure-as-code-terraform)
 - [Testing Your Deployment](#testing-your-deployment)
 - [Cost Estimates](#cost-estimates)
 - [Troubleshooting](#troubleshooting)
@@ -22,9 +24,10 @@ Before deploying to AWS Lambda, ensure you have:
 
 1. **AWS Account** - [Sign up here](https://aws.amazon.com/)
 2. **AWS CLI** installed and configured - [Installation guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-3. **API Keys** - Browserbase and OpenAI API keys (see [Browserbase setup](./browserbase.md))
-4. **Node.js 20+** or **Bun** installed locally for building
-5. **IAM Permissions** - Ability to create Lambda functions, IAM roles, and CloudWatch Logs
+3. **Docker** installed - Required for building Lambda container images
+4. **API Keys** - Browserbase and OpenAI API keys (see [Browserbase setup](./browserbase.md))
+5. **Node.js 20+** or **Bun** installed locally for building
+6. **IAM Permissions** - Ability to create Lambda functions, IAM roles, S3 buckets, ECR repositories, and CloudWatch Logs
 
 ---
 
@@ -34,11 +37,11 @@ Before deploying to AWS Lambda, ensure you have:
 
 | Setting | Value | Rationale |
 |---------|-------|-----------|
-| **Runtime** | Node.js 20.x | Latest LTS, Bun-compatible |
+| **Runtime** | Node.js 20.x (via Docker) | Latest LTS, Bun-compatible |
 | **Memory** | 2048 MB | Browser automation requires more memory |
-| **Timeout** | 300 seconds (5 minutes) | Maximum Lambda timeout, matches test duration |
-| **Ephemeral Storage** | 512 MB (default) | Sufficient for screenshots and reports |
-| **Architecture** | x86_64 | Broadest compatibility |
+| **Timeout** | 600 seconds (10 minutes) | Allows completion of complex tests with AI evaluation |
+| **Ephemeral Storage** | 512 MB (default) | Sufficient for screenshots and temporary reports |
+| **Architecture** | x86_64 (linux/amd64) | Required for Docker container images |
 
 ### Environment Variables
 
@@ -48,7 +51,123 @@ Required environment variables that must be set in Lambda configuration:
 BROWSERBASE_API_KEY=your_browserbase_api_key
 BROWSERBASE_PROJECT_ID=your_browserbase_project_id
 OPENAI_API_KEY=your_openai_api_key
+REPORTS_BUCKET_NAME=your-s3-bucket-name
 LOG_LEVEL=info  # Optional: debug, info, warn, error
+```
+
+---
+
+## S3 Report Storage Setup
+
+Lambda deployments use **S3 for persistent report storage**. Unlike local deployments where reports are stored on disk, Lambda's `/tmp` storage is ephemeral and limited to 512MB. S3 ensures test reports remain accessible after the Lambda function completes.
+
+### Why S3?
+
+- **Persistent**: Reports survive Lambda function termination
+- **Accessible**: HTTPS URLs returned in Lambda response for immediate access
+- **Cost-Effective**: 7-day lifecycle policy automatically deletes old reports
+- **Scalable**: No storage limits, handles concurrent uploads
+
+### Create S3 Bucket
+
+```bash
+# Set your AWS account ID
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Create S3 bucket for QA reports
+aws s3 mb s3://denethor-qa-reports-${AWS_ACCOUNT_ID} --region us-east-1
+
+# Add lifecycle policy to delete reports after 7 days
+cat > lifecycle-policy.json << 'EOF'
+{
+  "Rules": [
+    {
+      "Id": "DeleteOldReports",
+      "Status": "Enabled",
+      "Prefix": "reports/",
+      "Expiration": {
+        "Days": 7
+      }
+    }
+  ]
+}
+EOF
+
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket denethor-qa-reports-${AWS_ACCOUNT_ID} \
+  --lifecycle-configuration file://lifecycle-policy.json
+```
+
+### Configure IAM Permissions for S3
+
+The Lambda execution role needs permission to upload reports to S3. After creating your Lambda function (see deployment methods below), add this inline policy:
+
+```bash
+# Get the Lambda execution role name
+export LAMBDA_ROLE=$(aws lambda get-function-configuration \
+  --function-name denethor-game-qa \
+  --query 'Role' --output text | awk -F'/' '{print $NF}')
+
+# Create S3 access policy
+cat > s3-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::denethor-qa-reports-${AWS_ACCOUNT_ID}/reports/*"
+    }
+  ]
+}
+EOF
+
+# Attach policy to Lambda execution role
+aws iam put-role-policy \
+  --role-name ${LAMBDA_ROLE} \
+  --policy-name DenethorS3Access \
+  --policy-document file://s3-policy.json
+
+echo "S3 permissions configured for Lambda role: ${LAMBDA_ROLE}"
+```
+
+### Report Structure in S3
+
+Reports are organized by test ID:
+
+```
+s3://denethor-qa-reports-{account-id}/
+└── reports/
+    └── {testId}/
+        ├── report.json      # Structured test data
+        ├── report.md        # Human-readable summary
+        └── report.html      # Interactive dashboard (includes embedded screenshots)
+```
+
+### Lambda Response Format
+
+When S3 storage is configured, Lambda responses include both local paths and S3 URLs:
+
+```json
+{
+  "testId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "gameUrl": "https://example.com/game.html",
+  "status": "SUCCESS",
+  "scores": { "overallPlayability": 88 },
+  "reportPaths": {
+    "json": "/tmp/reports/report.json",
+    "markdown": "/tmp/reports/report.md",
+    "html": "/tmp/reports/report.html"
+  },
+  "s3Reports": {
+    "json": "https://denethor-qa-reports-123456.s3.amazonaws.com/reports/a1b2.../report.json",
+    "markdown": "https://denethor-qa-reports-123456.s3.amazonaws.com/reports/a1b2.../report.md",
+    "html": "https://denethor-qa-reports-123456.s3.amazonaws.com/reports/a1b2.../report.html"
+  }
+}
 ```
 
 ---
@@ -78,12 +197,16 @@ First, set up your environment variables that will be used for Lambda:
 
 ```bash
 # Create lambda-env.json with YOUR API keys
-cat > lambda-env.json << 'EOF'
+# First, get your AWS account ID for the S3 bucket name
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+cat > lambda-env.json << EOF
 {
   "Variables": {
     "BROWSERBASE_API_KEY": "your_browserbase_api_key_here",
     "BROWSERBASE_PROJECT_ID": "your_browserbase_project_id_here",
-    "OPENAI_API_KEY": "your_openai_api_key_here"
+    "OPENAI_API_KEY": "your_openai_api_key_here",
+    "REPORTS_BUCKET_NAME": "denethor-qa-reports-${AWS_ACCOUNT_ID}"
   }
 }
 EOF
@@ -92,6 +215,7 @@ EOF
 **Important:** Replace the placeholder values with your actual API keys from:
 - **Browserbase**: Sign up at [https://www.browserbase.com/](https://www.browserbase.com/) and get your API key + Project ID
 - **OpenAI**: Get your API key from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **S3 Bucket**: The script automatically uses your AWS account ID for the bucket name (created in S3 setup above)
 
 **Security Note:** The `lambda-env.json` file is in `.gitignore` and will NOT be committed to your repository. Each developer needs their own API keys.
 
@@ -178,7 +302,7 @@ aws lambda create-function \
   --package-type Image \
   --code ImageUri=${IMAGE_URI} \
   --role ${ROLE_ARN} \
-  --timeout 300 \
+  --timeout 600 \
   --memory-size 2048 \
   --environment file://lambda-env.json
 ```
@@ -301,7 +425,7 @@ du -h lambda-deployment.zip
 2. Click **Edit**
 3. Set:
    - **Memory**: 2048 MB
-   - **Timeout**: 5 min 0 sec
+   - **Timeout**: 10 min 0 sec (600 seconds)
 4. Click **Save**
 
 #### Step 6: Set Environment Variables
@@ -312,6 +436,7 @@ du -h lambda-deployment.zip
    - `BROWSERBASE_API_KEY` = your_key
    - `BROWSERBASE_PROJECT_ID` = your_project_id
    - `OPENAI_API_KEY` = your_openai_key
+   - `REPORTS_BUCKET_NAME` = denethor-qa-reports-YOUR_ACCOUNT_ID
    - `LOG_LEVEL` = info
 4. Click **Save**
 
@@ -386,12 +511,13 @@ aws lambda create-function \
   --role <ROLE_ARN> \
   --handler src/lambda/handler.handler \
   --zip-file fileb://lambda-deployment.zip \
-  --timeout 300 \
+  --timeout 600 \
   --memory-size 2048 \
   --environment Variables='{
     BROWSERBASE_API_KEY=your_browserbase_api_key,
     BROWSERBASE_PROJECT_ID=your_browserbase_project_id,
     OPENAI_API_KEY=your_openai_api_key,
+    REPORTS_BUCKET_NAME=denethor-qa-reports-YOUR_ACCOUNT_ID,
     LOG_LEVEL=info
   }'
 ```
@@ -434,6 +560,9 @@ terraform {
 provider "aws" {
   region = var.aws_region
 }
+
+# Data sources
+data "aws_caller_identity" "current" {}
 
 # Variables
 variable "aws_region" {
@@ -492,7 +621,7 @@ resource "aws_lambda_function" "browsergame_qa" {
   handler         = "src/lambda/handler.handler"
   source_code_hash = filebase64sha256("../lambda-deployment.zip")
   runtime         = "nodejs20.x"
-  timeout         = 300
+  timeout         = 600
   memory_size     = 2048
 
   environment {
@@ -500,6 +629,7 @@ resource "aws_lambda_function" "browsergame_qa" {
       BROWSERBASE_API_KEY    = var.browserbase_api_key
       BROWSERBASE_PROJECT_ID = var.browserbase_project_id
       OPENAI_API_KEY         = var.openai_api_key
+      REPORTS_BUCKET_NAME    = "denethor-qa-reports-${data.aws_caller_identity.current.account_id}"
       LOG_LEVEL              = "info"
     }
   }
@@ -617,12 +747,14 @@ curl -X POST \
 
 | Service | Cost Component | Estimate |
 |---------|---------------|----------|
-| **Lambda** | Compute time (2048 MB, 5 min) | $0.0017 |
+| **Lambda** | Compute time (2048 MB, ~5 min avg) | $0.0017 |
 | **Lambda** | Requests (1 invocation) | $0.0000002 |
+| **S3** | Storage (20 MB, 7 days) | $0.00001 |
+| **S3** | PUT requests (3 files) | $0.000015 |
 | **Browserbase** | Browser session (5 min) | $0.05 - $0.10 |
 | **OpenAI** | GPT-4o-mini tokens (~2000) | $0.001 - $0.003 |
 | **CloudWatch** | Logs (5 MB) | $0.00025 |
-| **Total per test** | | **$0.05 - $0.12** |
+| **Total per test** | | **$0.053 - $0.123** |
 
 ### Monthly Estimates
 
@@ -633,8 +765,10 @@ curl -X POST \
 | 10,000 tests | $500 - $1,200 |
 
 **Note:** Costs can be optimized by:
-- Reducing `maxActions` parameter
+- Reducing `maxActions` parameter (fewer actions = faster tests)
 - Adjusting `sessionTimeout` for faster tests
+- S3 lifecycle policy automatically deletes reports after 7 days (already configured)
+- Adjust lifecycle policy to fewer days if reports aren't needed long-term
 - Using Lambda reserved concurrency for predictable pricing
 - Implementing result caching for repeated tests
 
@@ -642,14 +776,15 @@ curl -X POST \
 
 ## Troubleshooting
 
-### Issue: "Task timed out after 300.00 seconds"
+### Issue: "Task timed out after 600.00 seconds"
 
-**Cause:** Test exceeded Lambda's 5-minute timeout
+**Cause:** Test exceeded Lambda's 10-minute timeout (which is already set to maximum recommended value)
 
 **Solutions:**
-- Reduce `maxActions` in event body (default: 20 → try 10-15)
-- Reduce `sessionTimeout` (default: 280000ms → try 240000ms)
-- Optimize game loading (some games take longer to load)
+- Reduce `maxActions` in event body (default: 20 → try 10-15 or even 5-10)
+- Reduce `sessionTimeout` (default: 280000ms → try 180000ms or 240000ms)
+- Some games may be too complex for serverless testing - consider using local CLI instead
+- Check CloudWatch logs to identify which phase is taking longest (browser automation vs AI evaluation)
 
 ### Issue: "Cannot find module 'src/lambda/handler'"
 
