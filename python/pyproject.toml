@@ -1,0 +1,35 @@
+[project]
+name = "denethor-rl"
+version = "0.1.0"
+description = "PufferLib-based RL training for browser games"
+requires-python = ">=3.11"
+dependencies = [
+    "pufferlib>=1.0.0",
+    "playwright>=1.40.0",
+    "gymnasium>=0.29.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0,<2.0.0",
+    "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+logging = [
+    "wandb>=0.16.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
