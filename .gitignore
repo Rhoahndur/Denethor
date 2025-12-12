@@ -16,6 +16,9 @@ qa-tests
 *.tgz
 my-results
 quick-test-output
+python/outputs/*
+python/src/denethor_rl/rewards/*
+python/src/denethor_rl/utils/*
 
 # deployment artifacts
 lambda-deployment.zip

@@ -8,6 +8,44 @@ import pufferlib.emulation
 from ..envs.game_env import BrowserGameEnv
 
 
+class EnvCreator:
+    """
+    Picklable environment creator for PufferLib multiprocessing.
+
+    This class wraps environment creation parameters so they can be
+    pickled and sent to worker processes.
+    """
+
+    def __init__(
+        self,
+        game_url: str,
+        game_category: str = "arcade",
+        use_universal_actions: bool = False,
+        headless: bool = True,
+        **kwargs,
+    ):
+        self.game_url = game_url
+        self.game_category = game_category
+        self.use_universal_actions = use_universal_actions
+        self.headless = headless
+        self.kwargs = kwargs
+
+    def __call__(self, buf=None):
+        """Create and return a PufferLib-wrapped environment.
+
+        Args:
+            buf: Buffer passed by PufferLib vectorization (ignored for Gymnasium envs)
+        """
+        env = BrowserGameEnv(
+            game_url=self.game_url,
+            game_category=self.game_category,
+            use_universal_actions=self.use_universal_actions,
+            headless=self.headless,
+            **self.kwargs,
+        )
+        return pufferlib.emulation.GymnasiumPufferEnv(env=env, buf=buf)
+
+
 def make_env(
     game_url: str,
     game_category: str = "arcade",
@@ -18,17 +56,12 @@ def make_env(
     """
     Environment factory for PufferLib vectorization.
 
-    Returns a function that creates PufferLib-wrapped environments.
+    Returns a picklable callable that creates PufferLib-wrapped environments.
     """
-
-    def _make():
-        env = BrowserGameEnv(
-            game_url=game_url,
-            game_category=game_category,
-            use_universal_actions=use_universal_actions,
-            headless=headless,
-            **kwargs,
-        )
-        return pufferlib.emulation.GymnasiumPufferEnv(env=env)
-
-    return _make
+    return EnvCreator(
+        game_url=game_url,
+        game_category=game_category,
+        use_universal_actions=use_universal_actions,
+        headless=headless,
+        **kwargs,
+    )

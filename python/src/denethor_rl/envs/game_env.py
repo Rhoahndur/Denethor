@@ -74,27 +74,29 @@ class BrowserGameEnv(BaseBrowserEnv):
         info["control_hints"] = self.game_config.control_hints
         return obs, info
 
-    def _execute_action(self, action: int):
-        """Execute action based on game config action map."""
+    async def _execute_action_async(self, action: int):
+        """Execute action based on game config action map (async)."""
         if action not in self._action_map:
             return  # Invalid action, do nothing
 
         action_type, action_value = self._action_map[action]
 
         if action_type == "keyboard":
-            self._page.keyboard.press(action_value)
+            await self._page.keyboard.press(action_value)
 
         elif action_type == "click":
             if isinstance(action_value, tuple):
                 # Normalized coordinates (0-1) -> pixel coordinates
                 x = int(action_value[0] * self.viewport_width)
                 y = int(action_value[1] * self.viewport_height)
-                self._page.mouse.click(x, y)
+                await self._page.mouse.click(x, y)
             elif action_value == "center":
-                self._page.mouse.click(self.viewport_width // 2, self.viewport_height // 2)
+                await self._page.mouse.click(
+                    self.viewport_width // 2, self.viewport_height // 2
+                )
 
         elif action_type == "wait":
-            self._page.wait_for_timeout(action_value)
+            await self._page.wait_for_timeout(action_value)
 
     def _compute_reward(self, obs: np.ndarray) -> float:
         """

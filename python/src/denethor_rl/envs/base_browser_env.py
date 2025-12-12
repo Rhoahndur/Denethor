@@ -1,15 +1,47 @@
 """
 Base browser environment for PufferLib training.
 Handles Playwright browser lifecycle and screenshot capture.
+
+Uses Playwright's async API internally to be compatible with PufferLib's
+asyncio-based vectorization.
 """
 
+import asyncio
 import io
 from typing import Optional
 
 import gymnasium as gym
 import numpy as np
 from PIL import Image
-from playwright.sync_api import Browser, Page, sync_playwright
+from playwright.async_api import async_playwright, Browser, Page
+
+
+def _get_or_create_event_loop():
+    """Get the current event loop or create a new one if needed."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+
+def _run_async(coro):
+    """Run an async coroutine from sync code, handling existing event loops."""
+    try:
+        loop = asyncio.get_running_loop()
+        # We're inside an async context, create a task
+        import nest_asyncio
+        nest_asyncio.apply()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        # No running loop, create one
+        loop = _get_or_create_event_loop()
+        return loop.run_until_complete(coro)
 
 
 class BaseBrowserEnv(gym.Env):
@@ -73,13 +105,13 @@ class BaseBrowserEnv(gym.Env):
         self._page: Optional[Page] = None
         self._steps = 0
 
-    def _ensure_browser(self):
-        """Lazy browser initialization."""
+    async def _ensure_browser_async(self):
+        """Lazy browser initialization (async)."""
         if self._page is not None:
             return
 
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(
             headless=self.headless,
             args=[
                 "--no-sandbox",
@@ -88,40 +120,52 @@ class BaseBrowserEnv(gym.Env):
                 "--disable-extensions",
             ],
         )
-        self._page = self._browser.new_page(
+        self._page = await self._browser.new_page(
             viewport={"width": self.viewport_width, "height": self.viewport_height}
         )
+
+    def _ensure_browser(self):
+        """Lazy browser initialization (sync wrapper)."""
+        if self._page is not None:
+            return
+        _run_async(self._ensure_browser_async())
+
+    async def _reset_async(
+        self, seed: Optional[int] = None, options: Optional[dict] = None
+    ) -> tuple[np.ndarray, dict]:
+        """Reset environment (async implementation)."""
+        await self._ensure_browser_async()
+
+        # Navigate to game
+        await self._page.goto(self.game_url, wait_until="domcontentloaded")
+        self._steps = 0
+
+        # Wait for initial load
+        await self._page.wait_for_timeout(2000)
+
+        obs = await self._get_observation_async()
+        info = {"steps": 0, "url": self.game_url}
+
+        return obs, info
 
     def reset(
         self, seed: Optional[int] = None, options: Optional[dict] = None
     ) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
+        return _run_async(self._reset_async(seed=seed, options=options))
 
-        self._ensure_browser()
-
-        # Navigate to game
-        self._page.goto(self.game_url, wait_until="domcontentloaded")
-        self._steps = 0
-
-        # Wait for initial load
-        self._page.wait_for_timeout(2000)
-
-        obs = self._get_observation()
-        info = {"steps": 0, "url": self.game_url}
-
-        return obs, info
-
-    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
+    async def _step_async(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
+        """Step environment (async implementation)."""
         self._steps += 1
 
         # Execute action (subclass implements this)
-        self._execute_action(action)
+        await self._execute_action_async(action)
 
         # Small delay for game to respond
-        self._page.wait_for_timeout(50)
+        await self._page.wait_for_timeout(50)
 
         # Get observation
-        obs = self._get_observation()
+        obs = await self._get_observation_async()
 
         # Compute reward (subclass can override)
         reward = self._compute_reward(obs)
@@ -137,9 +181,12 @@ class BaseBrowserEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def _execute_action(self, action: int):
-        """Execute action. Override in subclass."""
-        raise NotImplementedError("Subclass must implement _execute_action")
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
+        return _run_async(self._step_async(action))
+
+    async def _execute_action_async(self, action: int):
+        """Execute action (async). Override in subclass."""
+        raise NotImplementedError("Subclass must implement _execute_action_async")
 
     def _compute_reward(self, obs: np.ndarray) -> float:
         """Compute reward. Override in subclass for game-specific rewards."""
@@ -149,28 +196,36 @@ class BaseBrowserEnv(gym.Env):
         """Check if episode is done. Override in subclass."""
         return False  # Default: never terminates (relies on truncation)
 
-    def _get_observation(self) -> np.ndarray:
-        """Capture and resize screenshot."""
-        screenshot_bytes = self._page.screenshot(type="jpeg", quality=70)
+    async def _get_observation_async(self) -> np.ndarray:
+        """Capture and resize screenshot (async)."""
+        screenshot_bytes = await self._page.screenshot(type="jpeg", quality=70)
         img = Image.open(io.BytesIO(screenshot_bytes))
         img = img.resize((self.obs_width, self.obs_height), Image.BILINEAR)
         return np.array(img, dtype=np.uint8)
 
     def render(self) -> Optional[np.ndarray]:
         if self.render_mode == "rgb_array":
-            screenshot = self._page.screenshot(type="png")
-            img = Image.open(io.BytesIO(screenshot))
-            return np.array(img)
+
+            async def _render():
+                screenshot = await self._page.screenshot(type="png")
+                img = Image.open(io.BytesIO(screenshot))
+                return np.array(img)
+
+            return _run_async(_render())
         # "human" mode: browser is already visible if headless=False
         return None
 
-    def close(self):
+    async def _close_async(self):
+        """Close browser resources (async)."""
         if self._page:
-            self._page.close()
+            await self._page.close()
             self._page = None
         if self._browser:
-            self._browser.close()
+            await self._browser.close()
             self._browser = None
         if self._playwright:
-            self._playwright.stop()
+            await self._playwright.stop()
             self._playwright = None
+
+    def close(self):
+        _run_async(self._close_async())

@@ -20,7 +20,7 @@ def evaluate(
     use_universal_actions: bool = False,
     num_episodes: int = 3,
     delay_ms: int = 100,
-    max_steps: int = 1000,
+    max_steps: int = 200,  # Shorter for evaluation viewing
 ):
     """
     Run trained agent with visible browser.
@@ -67,6 +67,10 @@ def evaluate(
 
     print(f"\nControl hints: {env.game_config.control_hints}")
     print(f"Action space size: {num_actions}")
+    print(f"Max steps per episode: {max_steps}")
+    print(f"Delay between actions: {delay_ms}ms")
+    est_time = (max_steps * (delay_ms + 150)) / 1000  # 150ms for screenshot overhead
+    print(f"Estimated time per episode: ~{est_time:.0f}s")
     print(f"\nStarting evaluation ({num_episodes} episodes)...")
     print("=" * 50)
 
@@ -75,11 +79,12 @@ def evaluate(
 
     try:
         for episode in range(num_episodes):
+            print(f"\nEpisode {episode + 1}/{num_episodes}: Resetting environment (loading page)...")
             obs, info = env.reset()
+            print(f"  Environment ready! Running for up to {max_steps} steps...")
             episode_reward = 0
             step = 0
-
-            print(f"\nEpisode {episode + 1}/{num_episodes}")
+            start_time = time.time()
 
             while True:
                 # Get action from policy
@@ -88,6 +93,15 @@ def evaluate(
                     action_logits, value = policy(obs_tensor)
                     # Use greedy action selection during evaluation
                     action = action_logits.argmax(dim=1).item()
+
+                # Show progress with ETA
+                action_type, action_value = env._action_map.get(action, ("unknown", "?"))
+                elapsed = time.time() - start_time
+                if step > 0:
+                    eta = (elapsed / step) * (max_steps - step)
+                    print(f"\r  Step {step}/{max_steps} | action: {action_type}:{action_value} | reward: {episode_reward:.2f} | ETA: {eta:.0f}s   ", end="", flush=True)
+                else:
+                    print(f"\r  Step {step}/{max_steps} | action: {action_type}:{action_value} | reward: {episode_reward:.2f}   ", end="", flush=True)
 
                 # Execute action
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -98,11 +112,14 @@ def evaluate(
                 time.sleep(delay_ms / 1000)
 
                 if terminated or truncated:
+                    reason = "terminated" if terminated else "max steps reached"
+                    print(f"\n  Episode ended: {reason}")
                     break
 
             total_rewards.append(episode_reward)
             total_steps.append(step)
-            print(f"  Steps: {step}, Reward: {episode_reward:.2f}")
+            elapsed = time.time() - start_time
+            print(f"  Summary: {step} steps in {elapsed:.1f}s, total reward: {episode_reward:.2f}")
 
     except KeyboardInterrupt:
         print("\nEvaluation interrupted by user")
