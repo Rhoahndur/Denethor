@@ -3,6 +3,8 @@ PRD.md
 DEMO-SCRIPT.md
 demo-output
 .claude
+CURRENT*
+thoughts
 
 # dependencies (bun install)
 node_modules
