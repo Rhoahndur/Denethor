@@ -30,11 +30,12 @@ class EnvCreator:
         self.headless = headless
         self.kwargs = kwargs
 
-    def __call__(self, buf=None):
+    def __call__(self, buf=None, seed=None):
         """Create and return a PufferLib-wrapped environment.
 
         Args:
             buf: Buffer passed by PufferLib vectorization (ignored for Gymnasium envs)
+            seed: Random seed passed by PufferLib (used for environment reset)
         """
         env = BrowserGameEnv(
             game_url=self.game_url,
@@ -43,7 +44,10 @@ class EnvCreator:
             headless=self.headless,
             **self.kwargs,
         )
-        return pufferlib.emulation.GymnasiumPufferEnv(env=env, buf=buf)
+        wrapped = pufferlib.emulation.GymnasiumPufferEnv(env=env, buf=buf)
+        if seed is not None:
+            wrapped.reset(seed=seed)
+        return wrapped
 
 
 def make_env(

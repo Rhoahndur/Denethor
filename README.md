@@ -789,4 +789,77 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
+## Python/PufferLib RL Training
+
+In addition to the TypeScript QA system, Denethor includes a Python-based RL training system using PufferLib for training game-playing agents.
+
+### Features
+
+- **Per-game RL agents** trained via PufferLib with PPO
+- **Headed browser mode** for visualizing agent gameplay
+- **Screenshot-only observations** with configurable resolution
+- **Game-specific action spaces** with extensible registry
+- **Progress-based rewards** using DOM detection and OCR
+
+### Quick Start
+
+```bash
+# Setup Python environment (requires uv)
+make py-setup
+
+# Run tests
+make py-test
+
+# Train an agent (example)
+make py-train ARGS="https://example.com/snake --game-category arcade --timesteps 10000"
+
+# Evaluate with visible browser (headed mode)
+make py-evaluate ARGS="https://example.com/snake outputs/browser_game/final_policy.pt --game-category arcade"
+```
+
+### Game Categories
+
+The system includes pre-defined action spaces for common game types:
+
+| Category | Actions | Description |
+|----------|---------|-------------|
+| `arcade` | 7 | Arrow keys + Space + Enter + Wait |
+| `platformer` | 7 | Arrow keys + Space (jump) |
+| `puzzle` | 7 | Arrows + Z/X rotate + Space |
+| `point_and_click` | 25 | 5x5 mouse click grid |
+| `racing` | 5 | Up/Down/Left/Right + Coast |
+| `rhythm` | 6 | D/F/J/K lanes + Space |
+| `shooter` | 32 | WASD + mouse grid + reload |
+| `strategy` | 35 | Mouse grid + hotkeys (1-4, QWER) |
+| `card` | 26 | Mouse grid + wait |
+| `sports` | 10 | Arrows + action buttons |
+
+### Docker Training
+
+```bash
+# Build Docker image
+make py-docker
+
+# Run training in container
+docker-compose -f python/docker-compose.yml up
+```
+
+### Project Structure
+
+```
+python/
+├── src/denethor_rl/
+│   ├── envs/           # Browser environments (Gymnasium)
+│   ├── games/          # Game category registry
+│   ├── policies/       # CNN policy networks
+│   ├── rewards/        # Reward functions
+│   ├── training/       # PufferLib training/evaluation
+│   └── utils/          # State/progress detection
+├── tests/              # Test suite
+├── Dockerfile          # Training container
+└── docker-compose.yml  # Local container testing
+```
+
+---
+
 **Built with ❤️ for game developers by game developers**

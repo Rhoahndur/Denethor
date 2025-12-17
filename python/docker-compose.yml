@@ -1,0 +1,12 @@
+services:
+  training:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - WANDB_API_KEY=${WANDB_API_KEY:-}
+    volumes:
+      - ./outputs:/app/outputs
+    command: ["https://example.com/game", "--timesteps", "10000"]
+    cpus: 4
+    mem_limit: 4g

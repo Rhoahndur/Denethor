@@ -124,7 +124,7 @@ class TestBrowserGameEnvIntegration:
         assert obs.shape == (240, 320, 3)
         assert obs.dtype == np.uint8
         assert "steps" in info
-        assert "url" in info
+        # Note: url not in info - PufferLib requires numeric values only
 
         # Step
         for _ in range(5):

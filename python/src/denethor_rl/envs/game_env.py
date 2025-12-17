@@ -70,8 +70,8 @@ class BrowserGameEnv(BaseBrowserEnv):
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         obs, info = super().reset(seed=seed, options=options)
         self._prev_obs = obs.copy()
-        info["game_category"] = self.game_config.category.value
-        info["control_hints"] = self.game_config.control_hints
+        # Note: Don't add non-numeric values to info - PufferLib averages info across envs
+        # Game category and control hints are available via self.game_config
         return obs, info
 
     async def _execute_action_async(self, action: int):

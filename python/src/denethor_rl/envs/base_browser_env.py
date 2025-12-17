@@ -144,7 +144,8 @@ class BaseBrowserEnv(gym.Env):
         await self._page.wait_for_timeout(2000)
 
         obs = await self._get_observation_async()
-        info = {"steps": 0, "url": self.game_url}
+        # Only include numeric values in info (PufferLib averages info across envs)
+        info = {"steps": 0}
 
         return obs, info
 
